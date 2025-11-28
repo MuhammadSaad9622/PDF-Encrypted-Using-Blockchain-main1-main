@@ -4,8 +4,8 @@ import { getCachedMetadata, cacheMetadata, fetchAndCacheMetadata } from './nftCa
 // API utility with support for both development and production URLs
 const getApiUrl = () => {
   const isDevelopment = import.meta.env.DEV || window.location.hostname === 'localhost';
-  const productionUrl = 'https://pdf-encrypted-using-blockchain-2.onrender.com';
-  const developmentUrl = 'http://localhost:5000';
+  const productionUrl = 'https://doc-and-key-early-access.onrender.com';
+  const developmentUrl = 'https://doc-and-key-early-access.onrender.com';
   
   return isDevelopment ? developmentUrl : productionUrl;
 };
