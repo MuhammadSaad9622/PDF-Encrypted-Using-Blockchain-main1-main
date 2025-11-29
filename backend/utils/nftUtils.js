@@ -23,8 +23,16 @@ export const getUserNFTsFromDB = async (userId) => {
     console.log(`[NFT Utils] userId: ${userId}, Total NFTs: ${totalNFTs}, With userId: ${nftsWithUserId}, Orphans: ${orphanNFTs}`);
     
     // Try querying by ObjectId first (primary method)
-    let nfts = await NFT.find({ userId: userIdObjectId }).sort({ createdAt: -1 });
+    // Explicitly select fields we need including originalName
+    let nfts = await NFT.find({ userId: userIdObjectId })
+      .select('tokenId userId originalName createdAt')
+      .sort({ createdAt: -1 });
     console.log(`[NFT Utils] Query by ObjectId (${userIdObjectId.toString()}) found: ${nfts.length} NFTs`);
+    
+    // Log first NFT to verify originalName is included
+    if (nfts.length > 0) {
+      console.log(`[NFT Utils] Sample NFT: tokenId=${nfts[0].tokenId}, originalName=${nfts[0].originalName || 'null'}`);
+    }
     
     // Also try string format query (in case userId was stored as string)
     if (nfts.length === 0 && typeof userId === 'string') {

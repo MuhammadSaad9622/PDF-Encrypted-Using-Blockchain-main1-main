@@ -1542,12 +1542,35 @@ export const getUserNFTs = async (req, res) => {
         // If metadata fetch failed, construct basic metadata from database
         if (!metadata) {
           try {
-            const encryptionKey = JSON.parse(nft.encryptionKey);
             // Use original file name from database if available, otherwise use token ID
             const fileName = nft.originalName || `encrypted_${nft.tokenId}.pdf`;
             const displayName = nft.originalName 
               ? `Encrypted PDF: ${nft.originalName}` 
               : `Encrypted PDF #${nft.tokenId}`;
+            
+            // Parse encryption key if it exists
+            let encryptionDetails = {};
+            if (nft.encryptionKey) {
+              try {
+                const encryptionKey = JSON.parse(nft.encryptionKey);
+                encryptionDetails = {
+                  algorithm: 'AES-256-CBC',
+                  iv: encryptionKey.iv || null
+                };
+              } catch (parseError) {
+                console.warn(`Could not parse encryption key for token ${nft.tokenId}, using minimal metadata`);
+                encryptionDetails = {
+                  algorithm: 'AES-256-CBC',
+                  iv: null
+                };
+              }
+            } else {
+              console.warn(`No encryption key found for token ${nft.tokenId}, using minimal metadata`);
+              encryptionDetails = {
+                algorithm: 'AES-256-CBC',
+                iv: null
+              };
+            }
             
             metadata = {
               name: displayName,
@@ -1559,15 +1582,29 @@ export const getUserNFTs = async (req, res) => {
                   uri: nft.arweaveUrl || nft.supabaseUrl || '',
                   fallbackUri: nft.supabaseUrl || null
                 },
-                encryption: {
-                  algorithm: 'AES-256-CBC',
-                  iv: encryptionKey.iv
-                }
+                encryption: encryptionDetails
               }
             };
           } catch (error) {
-            console.error(`Error parsing encryption key for token ${nft.tokenId}:`, error);
-            return null;
+            console.error(`Error constructing metadata for token ${nft.tokenId}:`, error);
+            // Don't return null - still create basic metadata
+            const fileName = nft.originalName || `encrypted_${nft.tokenId}.pdf`;
+            metadata = {
+              name: nft.originalName ? `Encrypted PDF: ${nft.originalName}` : `Encrypted PDF #${nft.tokenId}`,
+              description: 'Encrypted PDF document',
+              properties: {
+                file: {
+                  name: fileName,
+                  type: 'application/pdf',
+                  uri: nft.arweaveUrl || nft.supabaseUrl || '',
+                  fallbackUri: nft.supabaseUrl || null
+                },
+                encryption: {
+                  algorithm: 'AES-256-CBC',
+                  iv: null
+                }
+              }
+            };
           }
         }
         

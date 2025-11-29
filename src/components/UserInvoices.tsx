@@ -5,13 +5,16 @@ import { useTheme, getGradientClasses } from '../utils/theme';
 
 interface Invoice {
   id: string;
-  tokenId: string;
+  subscriptionPlan?: string;
   amount: string;
   currency: string;
   status: string;
   type: string;
   createdAt: string;
-  transactionHash: string;
+  transactionHash?: string;
+  description?: string;
+  subscriptionStartDate?: string;
+  subscriptionEndDate?: string;
 }
 
 const UserInvoices = () => {
@@ -30,11 +33,24 @@ const UserInvoices = () => {
     try {
       setLoading(true);
       const response = await authApi.getUserInvoices(page, 20);
-      setInvoices(response.invoices || []);
-      setTotalPages(response.pagination?.pages || 1);
-      setSummary(response.summary);
+      
+      // Ensure we always have empty arrays if response is missing
+      setInvoices(response?.invoices || []);
+      setTotalPages(response?.pagination?.pages || 1);
+      setSummary(response?.summary || {
+        totalInvoices: 0,
+        paidInvoices: 0,
+        pendingInvoices: 0
+      });
     } catch (error: any) {
       console.error('Error fetching invoices:', error);
+      // On error, set empty state
+      setInvoices([]);
+      setSummary({
+        totalInvoices: 0,
+        paidInvoices: 0,
+        pendingInvoices: 0
+      });
     } finally {
       setLoading(false);
     }
@@ -62,23 +78,7 @@ const UserInvoices = () => {
 
       {/* Summary Cards */}
       {summary && (
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
-          <div className="card-dark">
-            <div className="flex items-center justify-between mb-4">
-              <Receipt className={`h-6 w-6 bg-gradient-to-r ${getGradientClasses(colorScheme, 'medium')} text-transparent bg-clip-text`} />
-            </div>
-            <h3 className="text-gray-400 text-sm font-medium mb-2">Total Invoices</h3>
-            <p className="text-3xl font-bold text-white">{summary.totalInvoices}</p>
-          </div>
-
-          <div className="card-dark">
-            <div className="flex items-center justify-between mb-4">
-              <DollarSign className="h-6 w-6 text-green-400" />
-            </div>
-            <h3 className="text-gray-400 text-sm font-medium mb-2">Total Amount</h3>
-            <p className="text-3xl font-bold text-white">{summary.totalAmount} MATIC</p>
-          </div>
-
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
           <div className="card-dark">
             <div className="flex items-center justify-between mb-4">
               <CheckCircle className="h-6 w-6 text-green-400" />
@@ -109,8 +109,7 @@ const UserInvoices = () => {
               <thead>
                 <tr className="border-b border-gray-700">
                   <th className="text-left py-3 px-4 text-gray-400 font-semibold">Invoice ID</th>
-                  <th className="text-left py-3 px-4 text-gray-400 font-semibold">Token ID</th>
-                  <th className="text-left py-3 px-4 text-gray-400 font-semibold">Type</th>
+                  <th className="text-left py-3 px-4 text-gray-400 font-semibold">Subscription Plan</th>
                   <th className="text-left py-3 px-4 text-gray-400 font-semibold">Amount</th>
                   <th className="text-left py-3 px-4 text-gray-400 font-semibold">Status</th>
                   <th className="text-left py-3 px-4 text-gray-400 font-semibold">Date</th>
@@ -127,12 +126,9 @@ const UserInvoices = () => {
                       <span className="text-white font-mono text-sm">{invoice.id}</span>
                     </td>
                     <td className="py-4 px-4">
-                      <span className={`text-purple-400 font-mono text-sm bg-gradient-to-r ${getGradientClasses(colorScheme, 'text')} bg-clip-text text-transparent`}>
-                        #{invoice.tokenId}
+                      <span className="text-white font-medium capitalize">
+                        {invoice.subscriptionPlan || invoice.type}
                       </span>
-                    </td>
-                    <td className="py-4 px-4">
-                      <span className="text-gray-300">{invoice.type}</span>
                     </td>
                     <td className="py-4 px-4">
                       <span className="text-white font-semibold">
@@ -199,7 +195,7 @@ const UserInvoices = () => {
           <Receipt className="h-16 w-16 text-gray-600 mx-auto mb-4" />
           <h3 className="text-xl font-semibold text-white mb-2">No Invoices Found</h3>
           <p className="text-gray-400">
-            You don't have any invoices yet. Invoices will appear here after you mint NFTs.
+            You don't have any subscription invoices yet. Invoices will appear here after you subscribe to the platform.
           </p>
         </div>
       )}

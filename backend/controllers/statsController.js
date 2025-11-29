@@ -43,11 +43,25 @@ export const getUserStats = async (req, res) => {
       }
     }
 
-    // Get recent NFTs (last 5)
-    const recentNFTs = nfts.slice(0, 5).map(nft => ({
-      tokenId: nft.tokenId,
-      tokenURI: null // Will be fetched from contract when needed
-    }));
+    // Get recent NFTs (last 5) with file names from database
+    // Since we already have originalName in the database, use it directly
+    const recentNFTs = nfts.slice(0, 5).map((nft) => {
+      // Log for debugging
+      console.log(`[Stats] Processing NFT ${nft.tokenId}, originalName: ${nft.originalName || 'null'}`);
+      
+      // Use originalName from database, fallback to token ID format
+      const pdfName = nft.originalName || `PDF #${nft.tokenId}`;
+      
+      console.log(`[Stats] NFT ${nft.tokenId} final pdfName: ${pdfName}`);
+      
+      return {
+        tokenId: nft.tokenId,
+        pdfName: pdfName,
+        tokenURI: null
+      };
+    });
+    
+    console.log(`[Stats] Recent NFTs:`, recentNFTs.map(n => ({ tokenId: n.tokenId, pdfName: n.pdfName })));
 
     // Calculate monthly stats (last 6 months)
     const monthlyStats = [];

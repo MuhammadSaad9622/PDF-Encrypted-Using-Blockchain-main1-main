@@ -183,7 +183,7 @@ export const getCurrentUser = async (req, res) => {
   }
 };
 
-// Get user invoices
+// Get user invoices (platform subscription invoices, not NFT mints)
 export const getUserInvoices = async (req, res) => {
   try {
     const userId = req.userId;
@@ -191,85 +191,44 @@ export const getUserInvoices = async (req, res) => {
     const limit = parseInt(req.query.limit) || 20;
     const skip = (page - 1) * limit;
 
-    const user = await User.findById(userId).select('walletAddress email name');
+    const user = await User.findById(userId).select('email name');
     if (!user) {
       return res.status(404).json({ error: 'User not found' });
     }
 
-    if (!user.walletAddress) {
-      return res.status(200).json({
-        success: true,
-        invoices: [],
-        pagination: {
-          page,
-          limit,
-          total: 0,
-          pages: 0
-        },
-        summary: {
-          totalInvoices: 0,
-          totalAmount: '0.00',
-          paidInvoices: 0,
-          pendingInvoices: 0
-        }
-      });
-    }
-
-    const provider = new ethers.JsonRpcProvider(
-      process.env.POLYGON_MAINNET_RPC_URL || 'https://polygon-rpc.com'
-    );
-
-    const invoices = [];
-
-    if (contractAddress) {
-      try {
-        const contract = new ethers.Contract(
-          contractAddress,
-          [
-            'function balanceOf(address owner) view returns (uint256)',
-            'function tokenOfOwnerByIndex(address owner, uint256 index) view returns (uint256)'
-          ],
-          provider
-        );
-
-        const balance = await contract.balanceOf(user.walletAddress);
-        const nftCount = Number(balance);
-
-        if (nftCount > 0) {
-          // Create invoice for each NFT
-          for (let i = 0; i < nftCount; i++) {
-            try {
-              const tokenId = await contract.tokenOfOwnerByIndex(user.walletAddress, i);
-              invoices.push({
-                id: `INV-${tokenId.toString()}-${user._id.toString()}`,
-                tokenId: tokenId.toString(),
-                amount: '0.01', // Mock amount - in production, track actual costs
-                currency: 'MATIC',
-                status: 'Paid',
-                type: 'NFT Mint',
-                createdAt: user.createdAt,
-                transactionHash: 'N/A' // Would track actual tx hash
-              });
-            } catch (error) {
-              console.error(`Error processing invoice for token ${i}:`, error.message);
-            }
-          }
-        }
-      } catch (error) {
-        console.warn(`Could not fetch invoices for user:`, error.message);
-      }
-    }
-
-    // Sort by creation date (newest first)
-    invoices.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+    // Get invoices from database for this user
+    const Invoice = (await import('../models/Invoice.js')).default;
+    const mongoose = (await import('mongoose')).default;
+    const userIdObjectId = new mongoose.Types.ObjectId(userId);
+    
+    // Get all invoices for this user
+    const invoices = await Invoice.find({ userId: userIdObjectId })
+      .sort({ createdAt: -1 });
 
     // Apply pagination
     const paginatedInvoices = invoices.slice(skip, skip + limit);
     const total = invoices.length;
+    const paidCount = invoices.filter(inv => inv.status === 'Paid').length;
+    const pendingCount = invoices.filter(inv => inv.status === 'Pending').length;
+
+    // Format invoices for frontend
+    const formattedInvoices = paginatedInvoices.map((invoice) => ({
+      id: invoice.invoiceId,
+      subscriptionPlan: invoice.subscriptionPlan,
+      amount: invoice.amount.toFixed(2),
+      currency: invoice.currency,
+      status: invoice.status,
+      type: `Subscription - ${invoice.subscriptionPlan}`,
+      createdAt: invoice.createdAt,
+      transactionHash: invoice.transactionHash || 'N/A',
+      description: invoice.description,
+      subscriptionStartDate: invoice.subscriptionStartDate,
+      subscriptionEndDate: invoice.subscriptionEndDate
+    }));
 
     res.status(200).json({
       success: true,
-      invoices: paginatedInvoices,
+      invoices: formattedInvoices,
       pagination: {
         page,
         limit,
@@ -278,9 +237,8 @@ export const getUserInvoices = async (req, res) => {
       },
       summary: {
         totalInvoices: total,
-        totalAmount: (total * 0.01).toFixed(2), // Mock calculation
-        paidInvoices: total,
-        pendingInvoices: 0
+        paidInvoices: paidCount,
+        pendingInvoices: pendingCount
       }
     });
   } catch (error) {

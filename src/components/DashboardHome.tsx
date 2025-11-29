@@ -37,12 +37,20 @@ const DashboardHome = () => {
       const response = await statsApi.getUserStats();
       const statsData = response.stats;
       
-      // Format recent activity to match expected format (with pdfName for display)
-      const recentActivity = statsData.recentActivity.map((nft: any) => ({
-        tokenId: nft.tokenId,
-        tokenURI: nft.tokenURI,
-        pdfName: `PDF #${nft.tokenId}` // Use token ID as name - metadata can load lazily if needed
-      }));
+      // Debug: Log what we receive from backend
+      console.log('[Dashboard] Stats response:', statsData);
+      console.log('[Dashboard] Recent activity from backend:', statsData.recentActivity);
+      
+      // Use recent activity with file names from backend
+      const recentActivity = statsData.recentActivity.map((nft: any) => {
+        const pdfName = nft.pdfName || `PDF #${nft.tokenId}`;
+        console.log(`[Dashboard] Processing NFT ${nft.tokenId}, pdfName: ${pdfName}`);
+        return {
+          tokenId: nft.tokenId,
+          tokenURI: nft.tokenURI,
+          pdfName: pdfName // Use file name from backend, fallback to token ID
+        };
+      });
 
       setStats({
         totalPDFs: statsData.totalPDFs,
