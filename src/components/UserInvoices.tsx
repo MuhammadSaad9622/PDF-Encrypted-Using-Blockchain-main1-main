@@ -65,20 +65,20 @@ const UserInvoices = () => {
   }
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-4 lg:space-y-6">
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
-          <h1 className={`text-3xl font-bold bg-gradient-to-r ${getGradientClasses(colorScheme, 'text')} bg-clip-text text-transparent`}>
+          <h1 className={`text-2xl lg:text-3xl font-bold bg-gradient-to-r ${getGradientClasses(colorScheme, 'text')} bg-clip-text text-transparent`}>
             Invoices
           </h1>
-          <p className="text-gray-400 mt-1">View your payment history and invoices</p>
+          <p className="text-gray-400 mt-1 text-sm lg:text-base">View your payment history and invoices</p>
         </div>
       </div>
 
       {/* Summary Cards */}
       {summary && (
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 lg:gap-6">
           <div className="card-dark">
             <div className="flex items-center justify-between mb-4">
               <CheckCircle className="h-6 w-6 text-green-400" />
@@ -104,40 +104,22 @@ const UserInvoices = () => {
             <FileText className="h-5 w-5" />
             <span>Invoice History</span>
           </h3>
-          <div className="overflow-x-auto">
-            <table className="w-full">
-              <thead>
-                <tr className="border-b border-gray-700">
-                  <th className="text-left py-3 px-4 text-gray-400 font-semibold">Invoice ID</th>
-                  <th className="text-left py-3 px-4 text-gray-400 font-semibold">Subscription Plan</th>
-                  <th className="text-left py-3 px-4 text-gray-400 font-semibold">Amount</th>
-                  <th className="text-left py-3 px-4 text-gray-400 font-semibold">Status</th>
-                  <th className="text-left py-3 px-4 text-gray-400 font-semibold">Date</th>
-                  <th className="text-left py-3 px-4 text-gray-400 font-semibold">Actions</th>
-                </tr>
-              </thead>
-              <tbody>
+          <div className="overflow-x-auto -mx-4 lg:mx-0">
+            <div className="min-w-full inline-block align-middle">
+              {/* Mobile Card View */}
+              <div className="lg:hidden space-y-3 p-4">
                 {invoices.map((invoice) => (
-                  <tr
+                  <div
                     key={invoice.id}
-                    className="border-b border-gray-800 hover:bg-gray-800/30 transition-colors"
+                    className="card-dark p-4 space-y-3"
                   >
-                    <td className="py-4 px-4">
-                      <span className="text-white font-mono text-sm">{invoice.id}</span>
-                    </td>
-                    <td className="py-4 px-4">
-                      <span className="text-white font-medium capitalize">
-                        {invoice.subscriptionPlan || invoice.type}
-                      </span>
-                    </td>
-                    <td className="py-4 px-4">
-                      <span className="text-white font-semibold">
-                        {invoice.amount} {invoice.currency}
-                      </span>
-                    </td>
-                    <td className="py-4 px-4">
+                    <div className="flex items-start justify-between">
+                      <div className="flex-1 min-w-0">
+                        <p className="text-xs text-gray-400 mb-1">Invoice ID</p>
+                        <p className="text-sm text-white font-mono truncate">{invoice.id}</p>
+                      </div>
                       <span
-                        className={`px-3 py-1 rounded-full text-xs font-semibold ${
+                        className={`px-2 py-1 rounded-full text-xs font-semibold whitespace-nowrap ml-2 ${
                           invoice.status === 'Paid'
                             ? 'bg-green-500/20 text-green-400'
                             : invoice.status === 'Pending'
@@ -147,28 +129,99 @@ const UserInvoices = () => {
                       >
                         {invoice.status}
                       </span>
-                    </td>
-                    <td className="py-4 px-4 text-gray-400 text-sm">
-                      {new Date(invoice.createdAt).toLocaleDateString()}
-                    </td>
-                    <td className="py-4 px-4">
+                    </div>
+                    <div className="grid grid-cols-2 gap-3 pt-2 border-t border-gray-800">
+                      <div>
+                        <p className="text-xs text-gray-400 mb-1">Plan</p>
+                        <p className="text-sm text-white capitalize">{invoice.subscriptionPlan || invoice.type}</p>
+                      </div>
+                      <div>
+                        <p className="text-xs text-gray-400 mb-1">Amount</p>
+                        <p className="text-sm text-white font-semibold">{invoice.amount} {invoice.currency}</p>
+                      </div>
+                      <div className="col-span-2">
+                        <p className="text-xs text-gray-400 mb-1">Date</p>
+                        <p className="text-sm text-gray-400">{new Date(invoice.createdAt).toLocaleDateString()}</p>
+                      </div>
+                    </div>
+                    <div className="flex justify-end pt-2 border-t border-gray-800">
                       <button
                         className="p-2 text-blue-400 hover:bg-blue-500/20 rounded-lg transition-colors"
                         title="Download Invoice"
                       >
                         <Download className="h-4 w-4" />
                       </button>
-                    </td>
-                  </tr>
+                    </div>
+                  </div>
                 ))}
-              </tbody>
-            </table>
+              </div>
+
+              {/* Desktop Table View */}
+              <table className="hidden lg:table w-full">
+                <thead>
+                  <tr className="border-b border-gray-700">
+                    <th className="text-left py-3 px-4 text-gray-400 font-semibold text-sm">Invoice ID</th>
+                    <th className="text-left py-3 px-4 text-gray-400 font-semibold text-sm">Subscription Plan</th>
+                    <th className="text-left py-3 px-4 text-gray-400 font-semibold text-sm">Amount</th>
+                    <th className="text-left py-3 px-4 text-gray-400 font-semibold text-sm">Status</th>
+                    <th className="text-left py-3 px-4 text-gray-400 font-semibold text-sm">Date</th>
+                    <th className="text-left py-3 px-4 text-gray-400 font-semibold text-sm">Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {invoices.map((invoice) => (
+                    <tr
+                      key={invoice.id}
+                      className="border-b border-gray-800 hover:bg-gray-800/30 transition-colors"
+                    >
+                      <td className="py-4 px-4">
+                        <span className="text-white font-mono text-sm">{invoice.id}</span>
+                      </td>
+                      <td className="py-4 px-4">
+                        <span className="text-white font-medium capitalize">
+                          {invoice.subscriptionPlan || invoice.type}
+                        </span>
+                      </td>
+                      <td className="py-4 px-4">
+                        <span className="text-white font-semibold">
+                          {invoice.amount} {invoice.currency}
+                        </span>
+                      </td>
+                      <td className="py-4 px-4">
+                        <span
+                          className={`px-3 py-1 rounded-full text-xs font-semibold ${
+                            invoice.status === 'Paid'
+                              ? 'bg-green-500/20 text-green-400'
+                              : invoice.status === 'Pending'
+                              ? 'bg-orange-500/20 text-orange-400'
+                              : 'bg-red-500/20 text-red-400'
+                          }`}
+                        >
+                          {invoice.status}
+                        </span>
+                      </td>
+                      <td className="py-4 px-4 text-gray-400 text-sm">
+                        {new Date(invoice.createdAt).toLocaleDateString()}
+                      </td>
+                      <td className="py-4 px-4">
+                        <button
+                          className="p-2 text-blue-400 hover:bg-blue-500/20 rounded-lg transition-colors"
+                          title="Download Invoice"
+                        >
+                          <Download className="h-4 w-4" />
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           </div>
 
           {/* Pagination */}
           {totalPages > 1 && (
-            <div className="flex items-center justify-between px-6 py-4 border-t border-gray-800">
-              <p className="text-sm text-gray-400">
+            <div className="flex flex-col sm:flex-row items-center justify-between gap-3 px-4 lg:px-6 py-4 border-t border-gray-800">
+              <p className="text-xs lg:text-sm text-gray-400">
                 Page {page} of {totalPages}
               </p>
               <div className="flex items-center space-x-2">

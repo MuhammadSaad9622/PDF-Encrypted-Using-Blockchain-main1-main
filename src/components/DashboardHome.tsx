@@ -105,9 +105,9 @@ const DashboardHome = () => {
     : 1;
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-4 lg:space-y-6">
       {/* Stats Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 lg:gap-6">
         <div className={`card-dark bg-gradient-to-r ${getGradientClasses(colorScheme, 'dark')} border-opacity-20 border-current`}>
           <div className="flex items-center justify-between">
             <div>
@@ -286,23 +286,23 @@ const DashboardHome = () => {
 
       {/* Hero Section */}
       <div className={`card-dark bg-gradient-to-r ${getGradientClasses(colorScheme, 'dark')} border-opacity-20 border-current`}>
-        <div className="text-center py-8">
-          <h1 className={`text-4xl font-bold mb-4 bg-gradient-to-r ${getGradientClasses(colorScheme, 'text')} bg-clip-text text-transparent`}>
+        <div className="text-center py-6 lg:py-8 px-4">
+          <h1 className={`text-2xl lg:text-4xl font-bold mb-3 lg:mb-4 bg-gradient-to-r ${getGradientClasses(colorScheme, 'text')} bg-clip-text text-transparent`}>
             Secure, encrypt, own your documents
           </h1>
-          <p className="text-gray-400 text-lg mb-2">AES-256-CBC ENCRYPTION</p>
-          <p className="text-gray-300 mb-6">
+          <p className="text-gray-400 text-base lg:text-lg mb-2">AES-256-CBC ENCRYPTION</p>
+          <p className="text-gray-300 mb-4 lg:mb-6 text-sm lg:text-base">
             Protect and manage PDFs with blockchain security and NFT ownership
           </p>
-          <Link to="/dashboard/upload" className="btn-primary inline-flex items-center space-x-2">
-            <Upload className="h-5 w-5" />
+          <Link to="/dashboard/upload" className="btn-primary inline-flex items-center space-x-2 text-sm lg:text-base">
+            <Upload className="h-4 w-4 lg:h-5 lg:w-5" />
             <span>Upload Your First PDF</span>
           </Link>
         </div>
       </div>
 
       {/* Features Grid */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 lg:gap-6">
         <div className="card-dark hover:opacity-80 transition-opacity">
           <div className={`h-12 w-12 rounded-lg bg-gradient-to-r ${getGradientClasses(colorScheme, 'medium')} flex items-center justify-center mb-4`}>
             <Shield className="h-6 w-6 text-white" />

@@ -92,14 +92,14 @@ const MyNFTs = () => {
   );
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-4 lg:space-y-6">
       <div className="relative">
         <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
           <Search className="h-5 w-5 text-gray-400" />
         </div>
         <input
           type="text"
-          className="input-dark w-full pl-10"
+          className="input-dark w-full pl-10 text-sm lg:text-base"
           placeholder="Search by file name..."
           value={searchQuery}
           onChange={(e) => setSearchQuery(e.target.value)}
@@ -107,12 +107,12 @@ const MyNFTs = () => {
       </div>
 
       {filteredNFTs.length === 0 ? (
-        <div className="text-center py-12">
-          <h3 className="text-lg font-medium text-white">No matching NFTs found</h3>
+        <div className="text-center py-8 lg:py-12">
+          <h3 className="text-base lg:text-lg font-medium text-white">No matching NFTs found</h3>
           <p className="mt-1 text-sm text-gray-400">Try adjusting your search query.</p>
         </div>
       ) : (
-        <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-3">
+        <div className="grid grid-cols-1 gap-4 lg:gap-6 sm:grid-cols-2 lg:grid-cols-3">
           {filteredNFTs.map((nft) => (
             <div key={nft.tokenId} className="card-dark">
               <h3 className="text-lg font-medium text-white truncate">{nft.name}</h3>
