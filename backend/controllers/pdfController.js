@@ -1088,11 +1088,62 @@ export const getNFTMetadata = async (req, res) => {
       }
     }
 
+    // If Arweave fetch failed, try to construct metadata from database
     if (!metadata) {
-      console.error('getNFTMetadata: Failed to fetch metadata from all gateways');
+      console.log('getNFTMetadata: Arweave fetch failed, trying to fetch from database...');
+      
+      try {
+        const NFT = (await import('../models/NFT.js')).default;
+        const { generateMetadata } = await import('../utils/generateMetadata.js');
+        
+        // Try to find NFT in database
+        const nftRecord = await NFT.findOne({ tokenId: tokenId.toString() });
+        
+        if (nftRecord) {
+          console.log('getNFTMetadata: Found NFT in database, constructing metadata...');
+          
+          // Parse encryption key
+          let encryptionKey = {};
+          try {
+            encryptionKey = JSON.parse(nftRecord.encryptionKey);
+          } catch (parseError) {
+            console.warn('getNFTMetadata: Could not parse encryption key from database');
+          }
+          
+          // Construct metadata from database
+          metadata = generateMetadata({
+            name: nftRecord.originalName 
+              ? `Encrypted PDF: ${nftRecord.originalName}` 
+              : `Encrypted PDF #${tokenId}`,
+            description: 'Encrypted PDF document with secure access',
+            arweaveUrl: nftRecord.arweaveUrl || null,
+            supabaseUrl: nftRecord.supabaseUrl || null,
+            supabasePath: nftRecord.supabasePath || null,
+            encryptionKey: encryptionKey,
+            originalName: nftRecord.originalName || `encrypted_${tokenId}.pdf`,
+            originalSize: null
+          });
+          
+          console.log('getNFTMetadata: ✅ Successfully constructed metadata from database');
+          console.log('getNFTMetadata: 📦 Using Supabase as storage fallback:', {
+            supabaseUrl: nftRecord.supabaseUrl ? 'Available' : 'Not available',
+            supabasePath: nftRecord.supabasePath ? 'Available' : 'Not available',
+            arweaveUrl: nftRecord.arweaveUrl ? 'Available (but failed)' : 'Not available'
+          });
+        } else {
+          console.log('getNFTMetadata: NFT not found in database either');
+        }
+      } catch (dbError) {
+        console.error('getNFTMetadata: Error fetching from database:', dbError.message);
+      }
+    }
+
+    // If still no metadata after database fallback, return error
+    if (!metadata) {
+      console.error('getNFTMetadata: Failed to fetch metadata from Arweave and database');
       return res.status(404).json({ 
-        error: 'Metadata not yet available on Arweave',
-        message: 'The NFT metadata is still propagating on Arweave. If you just minted this NFT, the metadata should be cached in your browser. Please try refreshing or wait a few moments for Arweave propagation.',
+        error: 'Metadata not yet available',
+        message: 'The NFT metadata is not available on Arweave and was not found in the database. If you just minted this NFT, please wait a few moments for Arweave propagation.',
         tokenId: tokenId,
         tokenURI: tokenURI
       });
