@@ -312,8 +312,8 @@ const UploadPDF = () => {
             </div>
             <div className="space-y-2 text-sm">
               <p><span className="font-medium">File:</span> {result.originalName}</p>
-              <p><span className="font-medium">Token ID:</span> {result.tokenId || 'N/A'}</p>
-              <p><span className="font-medium">Recipient:</span> {result.recipientAddress}</p>
+              {/* <p><span className="font-medium">Token ID:</span> {result.tokenId || 'N/A'}</p>
+              <p><span className="font-medium">Recipient:</span> {result.recipientAddress}</p> */}
               <p>
                 <span className="font-medium">Transaction:</span>{' '}
                 <a
@@ -325,7 +325,7 @@ const UploadPDF = () => {
                   View on PolygonScan
                 </a>
               </p>
-              <p>
+              {/* <p>
                 <span className="font-medium">Arweave File:</span>{' '}
                 <a
                   href={result.arweaveUrl}
@@ -335,8 +335,8 @@ const UploadPDF = () => {
                 >
                   View on Arweave
                 </a>
-              </p>
-              <p>
+              </p> */}
+              {/* <p>
                 <span className="font-medium">Metadata:</span>{' '}
                 <a
                   href={result.metadataArweaveUrl}
@@ -346,7 +346,7 @@ const UploadPDF = () => {
                 >
                   View Metadata
                 </a>
-              </p>
+              </p> */}
             </div>
           </div>
 
