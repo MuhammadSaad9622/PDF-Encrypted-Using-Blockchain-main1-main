@@ -31,6 +31,16 @@ const nftSchema = new mongoose.Schema({
     type: String,
     required: true
   },
+  userId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'User',
+    required: false, // Optional for backward compatibility
+    index: true
+  },
+  originalName: {
+    type: String,
+    default: null // Store original file name
+  },
   createdAt: {
     type: Date,
     default: Date.now

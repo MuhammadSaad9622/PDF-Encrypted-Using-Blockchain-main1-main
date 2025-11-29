@@ -1,15 +1,19 @@
 import express from 'express';
-import { encryptAndUpload,uploadAndEncrypt, decryptFile, getArweaveUploadPrice, generateMetadataJson, serveEncryptedFile, mintNftWithArweaveDetails, getTotalArweavePrice, getNFTMetadata, automatedUploadAndMint } from '../controllers/pdfController.js';
+import { encryptAndUpload,uploadAndEncrypt, decryptFile, getArweaveUploadPrice, generateMetadataJson, serveEncryptedFile, mintNftWithArweaveDetails, getTotalArweavePrice, getNFTMetadata, automatedUploadAndMint, getUserNFTs } from '../controllers/pdfController.js';
+import { authenticate } from '../middleware/auth.js';
 
 const router = express.Router();
 
 router.post('/encrypt-upload', encryptAndUpload);
 
-// Automated endpoint that handles entire flow
-router.post('/automated-upload-mint', automatedUploadAndMint);
+// Automated endpoint that handles entire flow - now requires authentication
+router.post('/automated-upload-mint', authenticate, automatedUploadAndMint);
 
-// Route for decrypting PDF (requires NFT ownership)
-router.post('/decrypt/:tokenId', decryptFile);
+// New endpoint to fetch user's NFTs (no wallet required)
+router.get('/user-nfts', authenticate, getUserNFTs);
+
+// Route for decrypting PDF (requires NFT ownership) - now uses authentication
+router.post('/decrypt/:tokenId', authenticate, decryptFile);
 
 // New route to fetch NFT metadata from Arweave via backend
 router.get('/nft-metadata/:tokenId', getNFTMetadata);

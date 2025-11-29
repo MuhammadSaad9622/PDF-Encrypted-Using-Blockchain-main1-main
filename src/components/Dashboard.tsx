@@ -1,34 +1,24 @@
-import { useState, useEffect, useRef } from 'react';
-import { createPortal } from 'react-dom';
+import { useState, useEffect } from 'react';
 import { Outlet, useNavigate, useLocation } from 'react-router-dom';
 import { 
   Upload, 
   FileText, 
   Settings, 
   LogOut, 
-  Wallet, 
   Menu, 
   X,
   Home,
   User,
-  ChevronDown,
-  Power,
   Receipt
 } from 'lucide-react';
 import { authApi } from '../utils/api';
-import { useWallet } from '../App';
 import { useTheme, getGradientClasses } from '../utils/theme';
 
 const Dashboard = () => {
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [user, setUser] = useState<any>(null);
-  const [walletMenuOpen, setWalletMenuOpen] = useState(false);
-  const [dropdownPosition, setDropdownPosition] = useState<{ top: number; right: number } | null>(null);
-  const walletMenuRef = useRef<HTMLDivElement>(null);
-  const walletButtonRef = useRef<HTMLButtonElement>(null);
   const navigate = useNavigate();
   const location = useLocation();
-  const { account, connectWallet, disconnectWallet, switchWallet } = useWallet();
   const { colorScheme } = useTheme();
 
   useEffect(() => {
@@ -57,65 +47,6 @@ const Dashboard = () => {
     navigate('/signin');
   };
 
-  // Calculate dropdown position when menu opens or window resizes
-  useEffect(() => {
-    const updatePosition = () => {
-      if (walletMenuOpen && walletButtonRef.current) {
-        const rect = walletButtonRef.current.getBoundingClientRect();
-        setDropdownPosition({
-          top: rect.bottom + 8,
-          right: window.innerWidth - rect.right,
-        });
-      }
-    };
-
-    if (walletMenuOpen) {
-      updatePosition();
-      window.addEventListener('resize', updatePosition);
-      window.addEventListener('scroll', updatePosition, true);
-    }
-
-    return () => {
-      window.removeEventListener('resize', updatePosition);
-      window.removeEventListener('scroll', updatePosition, true);
-    };
-  }, [walletMenuOpen]);
-
-  // Close wallet menu when clicking outside
-  useEffect(() => {
-    if (!walletMenuOpen) return;
-
-    const handleClickOutside = (event: MouseEvent) => {
-      const target = event.target as Node;
-      if (
-        walletButtonRef.current &&
-        !walletButtonRef.current.contains(target) &&
-        !(target as Element).closest('[data-wallet-dropdown]')
-      ) {
-        setWalletMenuOpen(false);
-      }
-    };
-
-    // Small delay to avoid closing immediately on button click
-    const timeoutId = setTimeout(() => {
-      document.addEventListener('mousedown', handleClickOutside);
-    }, 0);
-
-    return () => {
-      clearTimeout(timeoutId);
-      document.removeEventListener('mousedown', handleClickOutside);
-    };
-  }, [walletMenuOpen]);
-
-  const handleDisconnect = () => {
-    disconnectWallet();
-    setWalletMenuOpen(false);
-  };
-
-  const handleSwitch = async () => {
-    await switchWallet();
-    setWalletMenuOpen(false);
-  };
 
   const menuItems = [
     { icon: Home, label: 'Dashboard', path: '/dashboard' },
@@ -211,63 +142,11 @@ const Dashboard = () => {
               <Menu className="h-6 w-6" />
             </button>
             <div className="flex items-center space-x-4">
-              {account ? (
-                <div className="relative" ref={walletMenuRef}>
-                  <button
-                    ref={walletButtonRef}
-                    onClick={() => setWalletMenuOpen(!walletMenuOpen)}
-                    className="flex items-center space-x-2 px-4 py-2 bg-dark-hover rounded-lg hover:bg-dark-hover/80 transition-colors cursor-pointer"
-                  >
-                    <Wallet className="h-4 w-4 text-purple-400" />
-                    <span className="text-sm text-gray-300">
-                      {account.slice(0, 6)}...{account.slice(-4)}
-                    </span>
-                    <ChevronDown className={`h-4 w-4 text-gray-400 transition-transform ${walletMenuOpen ? 'rotate-180' : ''}`} />
-                  </button>
-                  
-                  {walletMenuOpen && dropdownPosition && createPortal(
-                    <div
-                      data-wallet-dropdown
-                      className="fixed bg-dark-card border border-gray-800 rounded-lg shadow-xl overflow-hidden z-[9999]"
-                      style={{
-                        top: `${dropdownPosition.top}px`,
-                        right: `${dropdownPosition.right}px`,
-                        width: '256px',
-                      }}
-                    >
-                      <div className="p-3">
-                        <div className="px-2 py-1.5 text-xs font-medium text-gray-400 border-b border-gray-800 mb-2">
-                          Wallet Address
-                        </div>
-                        <div className="px-2 py-2 text-xs text-white font-mono break-all bg-dark-hover rounded mb-2">
-                          {account ? (account.startsWith('0x') ? account : `0x${account}`) : 'Not connected'}
-                        </div>
-                        <div className="mt-2 space-y-1">
-                          <button
-                            onClick={handleSwitch}
-                            className="w-full text-left px-3 py-2 text-sm text-gray-300 hover:bg-dark-hover rounded-lg transition-colors flex items-center space-x-2"
-                          >
-                            <Wallet className="h-4 w-4 flex-shrink-0" />
-                            <span>Switch Wallet</span>
-                          </button>
-                          <button
-                            onClick={handleDisconnect}
-                            className="w-full text-left px-3 py-2 text-sm text-red-400 hover:bg-red-500/10 rounded-lg transition-colors flex items-center space-x-2"
-                          >
-                            <Power className="h-4 w-4 flex-shrink-0" />
-                            <span>Disconnect</span>
-                          </button>
-                        </div>
-                      </div>
-                    </div>,
-                    document.body
-                  )}
+              {/* User account info - wallet no longer needed */}
+              {user && (
+                <div className="text-sm text-gray-400">
+                  {user.email}
                 </div>
-              ) : (
-                <button onClick={connectWallet} className="btn-secondary flex items-center space-x-2">
-                  <Wallet className="h-4 w-4" />
-                  <span>Connect Wallet</span>
-                </button>
               )}
             </div>
           </div>

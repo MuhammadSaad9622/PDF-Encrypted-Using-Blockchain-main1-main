@@ -257,25 +257,52 @@ export const mintNFT = async (req, res) => {
 };
 export const decryptFile = async (req, res) => {
   try {
-    const { walletAddress } = req.body;
     const tokenId = req.params.tokenId;
+    const userId = req.userId; // From authentication middleware
 
-    // Initialize provider and contract
+    if (!userId) {
+      return res.status(401).json({ error: 'Authentication required' });
+    }
+
+    // First, verify ownership via database (userId)
+    const NFT = (await import('../models/NFT.js')).default;
+    const nftRecord = await NFT.findOne({ tokenId: tokenId.toString() });
+
+    if (!nftRecord) {
+      return res.status(404).json({ error: 'NFT not found' });
+    }
+
+    // Check if user owns this NFT via userId
+    const mongoose = (await import('mongoose')).default;
+    const userIdObjectId = typeof userId === 'string' ? new mongoose.Types.ObjectId(userId) : userId;
+    
+    if (!nftRecord.userId || nftRecord.userId.toString() !== userIdObjectId.toString()) {
+      // Fallback: If no userId stored, check blockchain ownership
+      // (for backward compatibility with older NFTs)
+      const { walletAddress } = req.body;
+      if (walletAddress) {
+        const provider = new ethers.JsonRpcProvider(process.env.POLYGON_MAINNET_RPC_URL || 'https://polygon-rpc.com');
+        const contract = new ethers.Contract(
+          contractAddress,
+          ['function ownerOf(uint256) view returns (address)'],
+          provider
+        );
+        const owner = await contract.ownerOf(tokenId);
+        if (owner.toLowerCase() !== walletAddress.toLowerCase()) {
+          return res.status(403).json({ error: 'Not authorized' });
+        }
+      } else {
+        return res.status(403).json({ error: 'Not authorized - you do not own this NFT' });
+      }
+    }
+
+    // Initialize provider and contract for tokenURI
     const provider = new ethers.JsonRpcProvider(process.env.POLYGON_MAINNET_RPC_URL || 'https://polygon-rpc.com');
     const contract = new ethers.Contract(
       contractAddress,
-      [
-        'function ownerOf(uint256) view returns (address)',
-        'function tokenURI(uint256) view returns (string)'
-      ],
+      ['function tokenURI(uint256) view returns (string)'],
       provider
     );
-
-    // Verify ownership
-    const owner = await contract.ownerOf(tokenId);
-    if (owner.toLowerCase() !== walletAddress.toLowerCase()) {
-      return res.status(403).json({ error: 'Not authorized' });
-    }
 
     // Get metadata with retry logic - try multiple gateways
     const tokenURI = await contract.tokenURI(tokenId);
@@ -1198,10 +1225,21 @@ export const automatedUploadAndMint = async (req, res) => {
       return res.status(400).json({ error: 'No PDF file uploaded' });
     }
 
+    // Get userId from authenticated request
+    const userId = req.userId;
+    if (!userId) {
+      return res.status(401).json({ error: 'Authentication required' });
+    }
+
     const { recipientAddress, name, description } = req.body;
 
-    if (!recipientAddress) {
-      return res.status(400).json({ error: 'Recipient address is required' });
+    // If no recipientAddress provided, use backend wallet address
+    // This allows minting without user wallet connection
+    let finalRecipientAddress = recipientAddress;
+    if (!finalRecipientAddress) {
+      const { getBackendWalletAddress } = await import('../utils/wallet.js');
+      finalRecipientAddress = getBackendWalletAddress();
+      console.log(`No recipient address provided, using backend wallet: ${finalRecipientAddress}`);
     }
 
     // Validate private key is available
@@ -1317,7 +1355,7 @@ export const automatedUploadAndMint = async (req, res) => {
     const iv = parsedEncryptionKey.iv;
     const encryptionKeyHash = ethers.keccak256(ethers.toUtf8Bytes(parsedEncryptionKey.key));
     const mintResult = await mintNFTDirectly(
-      recipientAddress,
+      finalRecipientAddress,
       metadataArweaveUrl,
       arweaveId,
       iv,
@@ -1368,11 +1406,12 @@ export const automatedUploadAndMint = async (req, res) => {
       }
     }
 
-    // Store NFT details in database for fallback when metadata is propagating
+    // Store NFT details in database with userId for user account linking
     // Only store if tokenId is available
     if (mintResult.tokenId) {
       try {
         const NFT = (await import('../models/NFT.js')).default;
+        const mongoose = (await import('mongoose')).default;
         await NFT.findOneAndUpdate(
           { tokenId: mintResult.tokenId.toString() },
           {
@@ -1382,11 +1421,13 @@ export const automatedUploadAndMint = async (req, res) => {
             supabaseUrl: finalSupabaseUrl,
             arweaveId: arweaveId,
             arweaveUrl: arweaveUrl,
-            recipientAddress: recipientAddress
+            recipientAddress: finalRecipientAddress,
+            userId: new mongoose.Types.ObjectId(userId), // Link NFT to user account
+            originalName: pdfFile.name // Store original file name
           },
           { upsert: true, new: true }
         );
-        console.log(`✅ Stored NFT details in database for tokenId ${mintResult.tokenId} (for fallback when metadata is propagating)`);
+        console.log(`✅ Stored NFT details in database for tokenId ${mintResult.tokenId} linked to userId ${userId}`);
       } catch (dbError) {
         console.error('⚠️ Failed to store NFT details in database (non-critical):', dbError.message);
         // Don't fail the entire operation if database storage fails
@@ -1435,7 +1476,7 @@ export const automatedUploadAndMint = async (req, res) => {
       },
       transactionHash: mintResult.transactionHash,
       tokenId: mintResult.tokenId,
-      recipientAddress,
+      recipientAddress: finalRecipientAddress,
       originalName: pdfFile.name,
       note: 'Arweave is primary storage. Supabase is fallback and may still be uploading in background.'
     });
@@ -1445,6 +1486,134 @@ export const automatedUploadAndMint = async (req, res) => {
     return res.status(500).json({ 
       error: error.message || 'Failed to process automated upload and mint',
       details: error.stack 
+    });
+  }
+};
+
+/**
+ * Get all NFTs owned by the authenticated user (from database, no wallet required)
+ */
+export const getUserNFTs = async (req, res) => {
+  try {
+    const userId = req.userId;
+    if (!userId) {
+      return res.status(401).json({ error: 'Authentication required' });
+    }
+
+    // Use shared utility function to get user's NFTs (ensures consistent logic)
+    const { getUserNFTsFromDB } = await import('../utils/nftUtils.js');
+    const nfts = await getUserNFTsFromDB(userId);
+    
+    console.log(`[getUserNFTs] Found ${nfts.length} NFTs for userId ${userId}`);
+
+    // Fetch metadata for each NFT
+    const nftData = await Promise.all(nfts.map(async (nft) => {
+      try {
+        // Try to fetch metadata from Arweave
+        let metadata = null;
+        try {
+          // Get tokenURI from contract
+          const provider = new ethers.JsonRpcProvider(process.env.POLYGON_MAINNET_RPC_URL || 'https://polygon-rpc.com');
+          const contract = new ethers.Contract(
+            contractAddress,
+            ['function tokenURI(uint256 tokenId) view returns (string)'],
+            provider
+          );
+          const tokenURI = await contract.tokenURI(nft.tokenId);
+          
+          // Extract Arweave ID
+          let arweaveId = tokenURI;
+          if (tokenURI.includes('/')) {
+            arweaveId = tokenURI.split('/').pop() || tokenURI;
+          }
+          arweaveId = arweaveId.split('?')[0].split('#')[0];
+          
+          // Try to fetch metadata
+          const metadataResponse = await fetch(`https://arweave.net/${arweaveId}`, {
+            signal: AbortSignal.timeout(10000) // 10 second timeout
+          });
+          if (metadataResponse.ok) {
+            metadata = await metadataResponse.json();
+          }
+        } catch (error) {
+          console.warn(`Could not fetch metadata for token ${nft.tokenId}:`, error.message);
+        }
+
+        // If metadata fetch failed, construct basic metadata from database
+        if (!metadata) {
+          try {
+            const encryptionKey = JSON.parse(nft.encryptionKey);
+            // Use original file name from database if available, otherwise use token ID
+            const fileName = nft.originalName || `encrypted_${nft.tokenId}.pdf`;
+            const displayName = nft.originalName 
+              ? `Encrypted PDF: ${nft.originalName}` 
+              : `Encrypted PDF #${nft.tokenId}`;
+            
+            metadata = {
+              name: displayName,
+              description: 'Encrypted PDF document with secure access',
+              properties: {
+                file: {
+                  name: fileName,
+                  type: 'application/pdf',
+                  uri: nft.arweaveUrl || nft.supabaseUrl || '',
+                  fallbackUri: nft.supabaseUrl || null
+                },
+                encryption: {
+                  algorithm: 'AES-256-CBC',
+                  iv: encryptionKey.iv
+                }
+              }
+            };
+          } catch (error) {
+            console.error(`Error parsing encryption key for token ${nft.tokenId}:`, error);
+            return null;
+          }
+        }
+        
+        // Always use the original file name from metadata or database for the NFT name
+        if (metadata.properties && metadata.properties.file && metadata.properties.file.name) {
+          const fileName = metadata.properties.file.name;
+          // Update the name to use the actual file name
+          if (fileName && fileName !== 'encrypted.pdf' && !fileName.includes('encrypted_')) {
+            metadata.name = `Encrypted PDF: ${fileName}`;
+          } else if (nft.originalName) {
+            // Fallback to database stored name
+            metadata.name = `Encrypted PDF: ${nft.originalName}`;
+            metadata.properties.file.name = nft.originalName;
+          }
+        } else if (nft.originalName) {
+          // If metadata doesn't have file name, use database stored name
+          metadata.name = `Encrypted PDF: ${nft.originalName}`;
+          if (!metadata.properties) metadata.properties = {};
+          if (!metadata.properties.file) metadata.properties.file = {};
+          metadata.properties.file.name = nft.originalName;
+        }
+
+        return {
+          tokenId: nft.tokenId,
+          ...metadata,
+          recipientAddress: nft.recipientAddress,
+          createdAt: nft.createdAt
+        };
+      } catch (error) {
+        console.error(`Error processing NFT ${nft.tokenId}:`, error);
+        return null;
+      }
+    }));
+
+    // Filter out nulls
+    const validNFTs = nftData.filter(nft => nft !== null);
+
+    return res.status(200).json({
+      success: true,
+      nfts: validNFTs,
+      count: validNFTs.length
+    });
+  } catch (error) {
+    console.error('Error in getUserNFTs:', error);
+    return res.status(500).json({ 
+      error: error.message || 'Failed to fetch user NFTs'
     });
   }
 };

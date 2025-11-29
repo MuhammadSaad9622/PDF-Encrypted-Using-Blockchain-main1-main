@@ -1,13 +1,10 @@
 import { useState, useEffect } from 'react';
-import { ethers } from 'ethers';
 import { useParams, useNavigate } from 'react-router-dom';
-import { FileText, Download, ArrowLeft, Wallet } from 'lucide-react';
-import { useWallet } from '../App';
+import { Download, ArrowLeft } from 'lucide-react';
 import { pdfApi } from '../utils/api';
-import { NFT_CONTRACT_ADDRESS, NFT_CONTRACT_ABI } from '../utils/constants';
 
 const ViewPDF = () => {
-  const { account, provider, connectWallet } = useWallet();
+  // Wallet connection is no longer required - ownership is verified via user account
   const { tokenId } = useParams();
   const navigate = useNavigate();
   const [loading, setLoading] = useState(true);
@@ -19,50 +16,23 @@ const ViewPDF = () => {
 
   useEffect(() => {
     const fetchNFTData = async () => {
-      if (!account || !provider || !tokenId) return;
+      if (!tokenId) return;
 
       try {
-        if (!NFT_CONTRACT_ADDRESS) {
-          setError('NFT contract address is not configured');
-          setLoading(false);
-          return;
-        }
-
-        const contract = new ethers.Contract(
-          NFT_CONTRACT_ADDRESS,
-          NFT_CONTRACT_ABI,
-          provider
-        );
-
-        // Verify ownership
-        const owner = await contract.ownerOf(tokenId);
-        if (owner.toLowerCase() !== account.toLowerCase()) {
-          setError('You do not own this NFT');
-          return;
-        }
-
-        // Get NFT data
-        const tokenURI = await contract.tokenURI(tokenId);
-        
-        console.log('fetchNFTData: Got token URI:', tokenURI);
-        
-        // Fetch metadata (will check cache first, then try direct Arweave, then backend)
+        // Fetch metadata (ownership verification happens on backend via user account)
         console.log('fetchNFTData: Fetching metadata for token ID:', tokenId);
         setDecryptStatus('Fetching metadata...');
         setDecryptProgress(5);
         
-        const metadata = await pdfApi.getNftMetadata(tokenId, tokenURI);
+        const metadata = await pdfApi.getNftMetadata(tokenId);
         console.log('fetchNFTData: Metadata received:', metadata);
         setMetadata(metadata);
 
-        // Get the Arweave ID from metadata
-        const arweaveId = metadata.properties.file.uri.split('/').pop();
-        
-        // Fetch and decrypt PDF with progress tracking
+        // Fetch and decrypt PDF with progress tracking (no wallet needed)
         setDecryptStatus('Connecting to Arweave...');
         setDecryptProgress(10);
         
-        const decryptResponse = await pdfApi.decryptFile(tokenId, account, (progress, status) => {
+        const decryptResponse = await pdfApi.decryptFile(tokenId, undefined, (progress, status) => {
           setDecryptProgress(progress);
           setDecryptStatus(status);
         });
@@ -100,24 +70,9 @@ const ViewPDF = () => {
     };
 
     fetchNFTData();
-  }, [account, provider, tokenId]);
+  }, [tokenId]);
 
-  if (!account) {
-    return (
-      <div className="text-center py-12">
-        <Wallet className="mx-auto h-12 w-12 text-gray-400 mb-4" />
-        <h3 className="text-lg font-medium text-white">No wallet connected</h3>
-        <p className="mt-1 text-sm text-gray-400">Please connect your wallet to view this PDF.</p>
-        <button
-          onClick={connectWallet}
-          className="btn-primary mt-6 inline-flex items-center space-x-2"
-        >
-          <Wallet className="h-5 w-5" />
-          <span>Connect Wallet</span>
-        </button>
-      </div>
-    );
-  }
+  // Wallet connection is no longer required - ownership is verified via user account
 
   if (loading) {
     return (

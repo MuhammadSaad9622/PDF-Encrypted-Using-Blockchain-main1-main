@@ -1,9 +1,6 @@
 import { useState, useEffect } from 'react';
 import { Link, useLocation } from 'react-router-dom';
-import { Upload, FileText, Shield, Zap, TrendingUp, BarChart3, Activity, RefreshCw, Wallet } from 'lucide-react';
-import { ethers } from 'ethers';
-import { useWallet } from '../App';
-import { NFT_CONTRACT_ADDRESS, NFT_CONTRACT_ABI } from '../utils/constants';
+import { Upload, FileText, Shield, Zap, TrendingUp, BarChart3, Activity, RefreshCw } from 'lucide-react';
 import { useTheme, getGradientClasses } from '../utils/theme';
 import { statsApi } from '../utils/api';
 
@@ -19,7 +16,6 @@ interface UserStats {
   totalNFTs: number;
   recentActivity: any[];
   monthlyStats: MonthlyStat[];
-  walletAddress?: string;
 }
 
 const DashboardHome = () => {
@@ -27,23 +23,9 @@ const DashboardHome = () => {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const location = useLocation();
-  const { account, provider, connectWallet } = useWallet();
   const { colorScheme } = useTheme();
 
-  const fetchStatsFromContract = async (showRefreshing = false) => {
-    if (!account) {
-      setStats({
-        totalPDFs: 0,
-        totalNFTs: 0,
-        recentActivity: [],
-        monthlyStats: [],
-        walletAddress: null
-      });
-      setLoading(false);
-      setRefreshing(false);
-      return;
-    }
-
+  const fetchStats = async (showRefreshing = false) => {
     try {
       if (showRefreshing) {
         setRefreshing(true);
@@ -51,91 +33,31 @@ const DashboardHome = () => {
         setLoading(true);
       }
 
-      // Use optimized backend API with 4 second timeout (direct wallet address for faster access)
-      const response = await Promise.race([
-        statsApi.getUserStats(account),
-        new Promise((_, reject) => 
-          setTimeout(() => reject(new Error('Stats fetch timeout after 4s')), 4000)
-        )
-      ]);
-
-      const stats = response.stats;
+      // Fetch stats from backend (database-based, no wallet required)
+      const response = await statsApi.getUserStats();
+      const statsData = response.stats;
       
       // Format recent activity to match expected format (with pdfName for display)
-      const recentActivity = stats.recentActivity.map((nft: any) => ({
+      const recentActivity = statsData.recentActivity.map((nft: any) => ({
         tokenId: nft.tokenId,
         tokenURI: nft.tokenURI,
         pdfName: `PDF #${nft.tokenId}` // Use token ID as name - metadata can load lazily if needed
       }));
 
       setStats({
-        totalPDFs: stats.totalPDFs,
-        totalNFTs: stats.totalNFTs,
+        totalPDFs: statsData.totalPDFs,
+        totalNFTs: statsData.totalNFTs,
         recentActivity: recentActivity,
-        monthlyStats: stats.monthlyStats,
-        walletAddress: stats.walletAddress || account
+        monthlyStats: statsData.monthlyStats
       });
     } catch (error: any) {
       console.error('Error fetching stats:', error);
-      // On error, try fallback: just get balance count (fast)
-      if (account && provider) {
-        try {
-          const contract = new ethers.Contract(
-            NFT_CONTRACT_ADDRESS,
-            ['function balanceOf(address) view returns (uint256)'],
-            provider
-          );
-          const balance = await Promise.race([
-            contract.balanceOf(account),
-            new Promise((_, reject) => setTimeout(() => reject(new Error('Timeout')), 2000))
-          ]);
-          const totalNFTs = Number(balance);
-          
-          // Calculate monthly stats quickly
-          const monthlyStats = [];
-          const currentDate = new Date();
-          const nftsPerMonth = Math.floor(totalNFTs / 6);
-          const remainder = totalNFTs % 6;
-          
-          for (let i = 5; i >= 0; i--) {
-            const date = new Date(currentDate.getFullYear(), currentDate.getMonth() - i, 1);
-            const monthName = date.toLocaleString('default', { month: 'short' });
-            const year = date.getFullYear();
-            const count = i >= (6 - remainder) ? nftsPerMonth + 1 : nftsPerMonth;
-            
-            monthlyStats.push({
-              month: `${monthName} ${year}`,
-              count: count,
-              monthIndex: date.getMonth(),
-              year: date.getFullYear()
-            });
-          }
-          
-          setStats({
-            totalPDFs: totalNFTs,
-            totalNFTs: totalNFTs,
-            recentActivity: [],
-            monthlyStats: monthlyStats,
-            walletAddress: account
-          });
-        } catch (fallbackError) {
-          setStats({
-            totalPDFs: 0,
-            totalNFTs: 0,
-            recentActivity: [],
-            monthlyStats: [],
-            walletAddress: account
-          });
-        }
-      } else {
-        setStats({
-          totalPDFs: 0,
-          totalNFTs: 0,
-          recentActivity: [],
-          monthlyStats: [],
-          walletAddress: account
-        });
-      }
+      setStats({
+        totalPDFs: 0,
+        totalNFTs: 0,
+        recentActivity: [],
+        monthlyStats: []
+      });
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -143,15 +65,15 @@ const DashboardHome = () => {
   };
 
   useEffect(() => {
-    fetchStatsFromContract();
+    fetchStats();
     
     // Refresh stats every 30 seconds
-    const interval = setInterval(() => fetchStatsFromContract(false), 30000);
+    const interval = setInterval(() => fetchStats(false), 30000);
     
     // Also refresh when user comes back to this tab
     const handleVisibilityChange = () => {
       if (document.visibilityState === 'visible') {
-        fetchStatsFromContract(false);
+        fetchStats(false);
       }
     };
     document.addEventListener('visibilitychange', handleVisibilityChange);
@@ -160,14 +82,14 @@ const DashboardHome = () => {
       clearInterval(interval);
       document.removeEventListener('visibilitychange', handleVisibilityChange);
     };
-  }, [account, provider]);
+  }, []);
 
-  // Refresh when navigating to dashboard or wallet changes
+  // Refresh when navigating to dashboard
   useEffect(() => {
     if (location.pathname === '/dashboard') {
-      fetchStatsFromContract(false);
+      fetchStats(false);
     }
-  }, [location.pathname, account]);
+  }, [location.pathname]);
 
   // Calculate max value for chart scaling
   const maxCount = stats?.monthlyStats.length 
@@ -234,7 +156,7 @@ const DashboardHome = () => {
               <span>Monthly Activity</span>
             </h2>
             <button
-              onClick={() => fetchStatsFromContract(true)}
+              onClick={() => fetchStats(true)}
               disabled={refreshing}
               className="btn-secondary p-2"
               title="Refresh stats"
@@ -243,19 +165,7 @@ const DashboardHome = () => {
             </button>
           </div>
           
-          {!account ? (
-            <div className="flex flex-col items-center justify-center h-64 text-gray-400">
-              <Wallet className="h-12 w-12 mb-4 opacity-50" />
-              <p>Connect your wallet to view analytics</p>
-              <button
-                onClick={connectWallet}
-                className="btn-primary mt-4 inline-flex items-center space-x-2"
-              >
-                <Wallet className="h-4 w-4" />
-                <span>Connect Wallet</span>
-              </button>
-            </div>
-          ) : loading ? (
+          {loading ? (
             <div className="flex items-center justify-center h-64">
               <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-purple-500"></div>
             </div>
@@ -321,7 +231,7 @@ const DashboardHome = () => {
               <span>Recent Activity</span>
             </h2>
             <button
-              onClick={() => fetchStatsFromContract(true)}
+              onClick={() => fetchStats(true)}
               disabled={refreshing}
               className="btn-secondary p-2"
               title="Refresh stats"
@@ -330,19 +240,7 @@ const DashboardHome = () => {
             </button>
           </div>
           
-          {!account ? (
-            <div className="flex flex-col items-center justify-center h-64 text-gray-400">
-              <Wallet className="h-12 w-12 mb-4 opacity-50" />
-              <p>Connect your wallet to view analytics</p>
-              <button
-                onClick={connectWallet}
-                className="btn-primary mt-4 inline-flex items-center space-x-2"
-              >
-                <Wallet className="h-4 w-4" />
-                <span>Connect Wallet</span>
-              </button>
-            </div>
-          ) : loading ? (
+          {loading ? (
             <div className="flex items-center justify-center h-64">
               <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-purple-500"></div>
             </div>

@@ -4,9 +4,8 @@ import { authenticate } from '../middleware/auth.js';
 
 const router = express.Router();
 
-// Support both authenticated and unauthenticated (with walletAddress query param) access
+// User stats endpoint (requires authentication, fetches from database - no wallet required)
 router.get('/user-stats', authenticate, getUserStats);
-router.get('/wallet-stats', getUserStats); // Direct wallet address access (no auth required)
 
 export default router;
 

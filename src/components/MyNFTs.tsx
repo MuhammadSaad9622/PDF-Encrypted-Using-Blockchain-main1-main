@@ -1,10 +1,7 @@
 import { useState, useEffect } from 'react';
-import { ethers } from 'ethers';
 import { useNavigate } from 'react-router-dom';
-import { FileText, Eye, Search, Wallet } from 'lucide-react';
-import { useWallet } from '../App';
+import { FileText, Eye, Search } from 'lucide-react';
 import { pdfApi } from '../utils/api';
-import { NFT_CONTRACT_ADDRESS, NFT_CONTRACT_ABI } from '../utils/constants';
 
 interface NFT {
   tokenId: string;
@@ -25,7 +22,7 @@ interface NFT {
 }
 
 const MyNFTs = () => {
-  const { account, provider, connectWallet } = useWallet();
+  // Wallet connection is no longer required - NFTs are fetched from backend by user account
   const [nfts, setNfts] = useState<NFT[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -34,80 +31,22 @@ const MyNFTs = () => {
 
   useEffect(() => {
     const fetchNFTs = async () => {
-      console.log('fetchNFTs: Starting fetch. Account:', account, 'Provider:', !!provider);
-
-      if (!account || !provider) {
-        console.log('fetchNFTs: Account or provider not available. Exiting.');
-        setLoading(false); // Ensure loading is set to false if we exit early
-        return;
-      }
+      console.log('fetchNFTs: Starting fetch from backend API (no wallet required)');
 
       try {
-        // Log the connected network
-        try {
-          const network = await provider.getNetwork();
-          console.log('fetchNFTs: Connected network:', network.chainId, network.name);
-        } catch (netErr) {
-          console.error('fetchNFTs: Could not get network from provider:', netErr);
-          // Continue, as sometimes provider might be valid even if network check fails early
-        }
-
-        console.log('fetchNFTs: Using contract address:', NFT_CONTRACT_ADDRESS);
-
-        if (!NFT_CONTRACT_ADDRESS) {
-          console.error('fetchNFTs: NFT contract address is not defined');
-          setError('NFT contract address is not configured.');
-          setLoading(false);
-          return;
-        }
-
-        const contract = new ethers.Contract(
-          NFT_CONTRACT_ADDRESS,
-          NFT_CONTRACT_ABI,
-          provider
-        );
-
-        console.log('fetchNFTs: Contract instance created. Calling balanceOf...');
-        const balance = await contract.balanceOf(account);
-        console.log('fetchNFTs: Balance received:', balance.toString());
+        // Fetch NFTs from backend API (linked to user account)
+        const response = await pdfApi.getUserNFTs();
+        console.log('fetchNFTs: Response received:', response);
         
-        if (balance === 0n) {
+        if (response.success && response.nfts) {
+          setNfts(response.nfts);
+        } else {
           setNfts([]);
-          setLoading(false);
-          return;
         }
-
-        // Fetch all token IDs in parallel
-        const tokenIdPromises = [];
-        for (let i = 0; i < balance; i++) {
-          tokenIdPromises.push(contract.tokenOfOwnerByIndex(account, i));
-        }
-        const tokenIds = await Promise.all(tokenIdPromises);
-        console.log('fetchNFTs: All token IDs fetched:', tokenIds.map(t => t.toString()));
-
-        // Fetch all metadata in parallel
-        const nftPromises = tokenIds.map(async (tokenId) => {
-          try {
-            const tokenIdStr = tokenId.toString();
-            console.log('fetchNFTs: Fetching metadata for token ID:', tokenIdStr);
-            const metadata = await pdfApi.getNftMetadata(tokenIdStr);
-            console.log('fetchNFTs: Metadata received for token ID:', tokenIdStr);
-            return {
-              tokenId: tokenIdStr,
-              ...metadata
-            };
-          } catch (error) {
-            console.error(`Error fetching metadata for token ${tokenId.toString()}:`, error);
-            return null;
-          }
-        });
-
-        const nftData = (await Promise.all(nftPromises)).filter(nft => nft !== null);
-        console.log('fetchNFTs: All NFT data fetched', nftData);
-        setNfts(nftData);
       } catch (err: any) {
         console.error('fetchNFTs: Error fetching NFTs:', err);
         setError(err.message || 'Error fetching NFTs');
+        setNfts([]);
       } finally {
         setLoading(false);
         console.log('fetchNFTs: Loading set to false');
@@ -115,24 +54,9 @@ const MyNFTs = () => {
     };
 
     fetchNFTs();
-  }, [account, provider]);
+  }, []); // No dependencies - fetch on mount
 
-  if (!account) {
-    return (
-      <div className="text-center py-12">
-        <Wallet className="mx-auto h-12 w-12 text-gray-400 mb-4" />
-        <h3 className="text-lg font-medium text-white">No wallet connected</h3>
-        <p className="mt-1 text-sm text-gray-400">Please connect your wallet to view your NFTs.</p>
-        <button
-          onClick={connectWallet}
-          className="btn-primary mt-6 inline-flex items-center space-x-2"
-        >
-          <Wallet className="h-5 w-5" />
-          <span>Connect Wallet</span>
-        </button>
-      </div>
-    );
-  }
+  // Wallet connection is no longer required - NFTs are linked to user account
 
   if (loading) {
     return (

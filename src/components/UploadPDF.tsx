@@ -1,8 +1,7 @@
-import { useState, useRef, useEffect } from 'react';
-import { FileUp, Upload, CheckCircle2, Loader2, AlertCircle, Wallet } from 'lucide-react';
+import { useState, useRef } from 'react';
+import { FileUp, Upload, CheckCircle2, Loader2, AlertCircle } from 'lucide-react';
 import { pdfApi } from '../utils/api';
 import { cacheMetadata, fetchAndCacheMetadata } from '../utils/nftCache';
-import { useWallet } from '../App';
 
 interface ProgressStep {
   name: string;
@@ -11,7 +10,6 @@ interface ProgressStep {
 }
 
 const UploadPDF = () => {
-  const { account, connectWallet } = useWallet();
   const [file, setFile] = useState<File | null>(null);
   const [recipientAddress, setRecipientAddress] = useState<string>('');
   const [loading, setLoading] = useState<boolean>(false);
@@ -20,15 +18,6 @@ const UploadPDF = () => {
   const [currentStep, setCurrentStep] = useState<string>('');
   const [progressPercentage, setProgressPercentage] = useState<number>(0);
   const fileInputRef = useRef<HTMLInputElement>(null);
-
-  // Auto-populate recipient address from connected wallet
-  useEffect(() => {
-    if (account) {
-      setRecipientAddress(account);
-    } else {
-      setRecipientAddress('');
-    }
-  }, [account]);
 
   const steps: ProgressStep[] = [
     { name: 'Uploading PDF', status: 'pending', percentage: 0 },
@@ -85,14 +74,8 @@ const UploadPDF = () => {
       setError('Please select a PDF file');
       return;
     }
-    if (!account) {
-      setError('Please connect your wallet first');
-      return;
-    }
-    if (!recipientAddress) {
-      setError('Wallet address is required');
-      return;
-    }
+    // Wallet connection is now optional - if not connected, backend will mint to its wallet
+    // recipientAddress is also optional now
 
     setLoading(true);
     setError(null);
@@ -103,7 +86,10 @@ const UploadPDF = () => {
     try {
       const formData = new FormData();
       formData.append('pdf', file);
-      formData.append('recipientAddress', recipientAddress);
+      // Only include recipientAddress if provided (optional - backend will use its wallet if not provided)
+      if (recipientAddress) {
+        formData.append('recipientAddress', recipientAddress);
+      }
       formData.append('name', `Encrypted PDF: ${file.name}`);
       formData.append('description', 'Encrypted PDF document with secure access');
 
@@ -233,49 +219,8 @@ const UploadPDF = () => {
             </div>
           </div>
 
-          {/* Recipient Address */}
-          <div>
-            <label className="block text-gray-300 text-sm font-bold mb-2">
-              Recipient Wallet Address (Polygon)
-            </label>
-            {account ? (
-              <div className="space-y-2">
-                <input
-                  type="text"
-                  value={recipientAddress}
-                  onChange={(e) => setRecipientAddress(e.target.value)}
-                  className="input-dark w-full"
-                  placeholder="0x..."
-                  required
-                  disabled={loading}
-                />
-                <p className="text-xs text-gray-500 flex items-center space-x-1">
-                  <Wallet className="h-3 w-3" />
-                  <span>Using connected wallet: {account.slice(0, 6)}...{account.slice(-4)}</span>
-                </p>
-              </div>
-            ) : (
-              <div className="space-y-2">
-                <input
-                  type="text"
-                  value={recipientAddress}
-                  onChange={(e) => setRecipientAddress(e.target.value)}
-                  className="input-dark w-full"
-                  placeholder="0x..."
-                  required
-                  disabled={loading}
-                />
-                <button
-                  type="button"
-                  onClick={connectWallet}
-                  className="btn-secondary text-sm py-2 px-4 inline-flex items-center space-x-2"
-                >
-                  <Wallet className="h-4 w-4" />
-                  <span>Connect Wallet to Auto-fill Address</span>
-                </button>
-              </div>
-            )}
-          </div>
+          {/* Recipient Address - Optional (Hidden - always uses backend wallet) */}
+          {/* Address input removed - always uses backend wallet now */}
 
           {/* Progress Bar */}
           {loading && (
@@ -341,7 +286,7 @@ const UploadPDF = () => {
           {/* Submit Button */}
           <button
             type="submit"
-            disabled={loading || !file || !recipientAddress || !account}
+            disabled={loading || !file}
             className="btn-primary w-full py-3 disabled:opacity-50 disabled:cursor-not-allowed"
           >
             {loading ? (

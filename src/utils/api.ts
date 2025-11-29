@@ -5,7 +5,7 @@ import { getCachedMetadata, cacheMetadata, fetchAndCacheMetadata } from './nftCa
 const getApiUrl = () => {
   const isDevelopment = import.meta.env.DEV || window.location.hostname === 'localhost';
   const productionUrl = 'https://doc-and-key-early-access.onrender.com';
-  const developmentUrl = 'https://doc-and-key-early-access.onrender.com';
+  const developmentUrl = 'http://localhost:5000';
   
   return isDevelopment ? developmentUrl : productionUrl;
 };
@@ -209,7 +209,7 @@ export const pdfApi = {
     return metadata;
   },
   
-  decryptFile: async (tokenId: string, walletAddress: string, onProgress?: (progress: number, status: string) => void) => {
+  decryptFile: async (tokenId: string, walletAddress?: string, onProgress?: (progress: number, status: string) => void) => {
     const token = localStorage.getItem('token');
     
     // Use XMLHttpRequest for progress tracking
@@ -301,8 +301,14 @@ export const pdfApi = {
       }
       xhr.responseType = 'blob';
       
-      xhr.send(JSON.stringify({ walletAddress }));
+      // Send walletAddress only if provided (for backward compatibility)
+      const requestBody = walletAddress ? JSON.stringify({ walletAddress }) : JSON.stringify({});
+      xhr.send(requestBody);
     });
+  },
+
+  getUserNFTs: async () => {
+    return apiCall('/api/user-nfts');
   },
 
   automatedUploadAndMint: async (formData: FormData) => {
@@ -324,12 +330,8 @@ export const pdfApi = {
 
 // Stats API calls
 export const statsApi = {
-  getUserStats: async (walletAddress?: string) => {
-    if (walletAddress) {
-      // Use direct wallet endpoint for faster access (no auth needed)
-      return apiCall(`/api/stats/wallet-stats?walletAddress=${encodeURIComponent(walletAddress)}`);
-    }
-    // Use authenticated endpoint
+  getUserStats: async () => {
+    // Fetch stats from backend database (requires authentication)
     return apiCall('/api/stats/user-stats');
   },
 };

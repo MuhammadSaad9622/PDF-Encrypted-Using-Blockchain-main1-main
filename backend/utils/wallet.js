@@ -120,6 +120,18 @@ export const mintNFTWithMetadata = async (
  * @param {bytes32} encryptionKeyHash - Hash of the encryption key
  * @returns {Promise<object>} - Transaction receipt with tokenId
  */
+/**
+ * Get the backend wallet address from private key
+ * @returns {string} - Backend wallet address
+ */
+export const getBackendWalletAddress = () => {
+  if (!process.env.PRIVATE_KEY) {
+    throw new Error('PRIVATE_KEY not found in environment variables');
+  }
+  const wallet = new ethers.Wallet(process.env.PRIVATE_KEY, provider);
+  return wallet.address;
+};
+
 export const mintNFTDirectly = async (
   recipientAddress,
   metadataUri,
