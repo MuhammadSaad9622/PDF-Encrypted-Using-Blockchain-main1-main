@@ -41,6 +41,10 @@ const nftSchema = new mongoose.Schema({
     type: String,
     default: null // Store original file name
   },
+  fileSize: {
+    type: Number, // Original file size in bytes
+    default: 0
+  },
   createdAt: {
     type: Date,
     default: Date.now

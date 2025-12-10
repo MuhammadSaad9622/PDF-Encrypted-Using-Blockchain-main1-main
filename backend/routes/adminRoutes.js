@@ -8,8 +8,17 @@ import {
   deleteUser,
   getAnalytics,
   getDashboardStats,
-  getBillingInvoices
+  getBillingInvoices,
+  suspendUser,
+  unsuspendUser,
+  updateUserNotes
 } from '../controllers/adminController.js';
+import {
+  createAccessCode,
+  getAccessCodes,
+  updateAccessCode,
+  deleteAccessCode
+} from '../controllers/accessCodeController.js';
 import { adminAuth } from '../middleware/adminAuth.js';
 
 const router = express.Router();
@@ -30,9 +39,18 @@ router.get('/users/:userId', getUserById);
 router.get('/users/:userId/nfts', getUserNFTDetails);
 router.put('/users/:userId', updateUser);
 router.delete('/users/:userId', deleteUser);
+router.post('/users/:userId/suspend', suspendUser);
+router.post('/users/:userId/unsuspend', unsuspendUser);
+router.put('/users/:userId/notes', updateUserNotes);
 
 // Billing and invoices
 router.get('/billing/invoices', getBillingInvoices);
+
+// Access code management
+router.post('/access-codes', createAccessCode);
+router.get('/access-codes', getAccessCodes);
+router.put('/access-codes/:id', updateAccessCode);
+router.delete('/access-codes/:id', deleteAccessCode);
 
 export default router;
 

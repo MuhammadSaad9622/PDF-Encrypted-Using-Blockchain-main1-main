@@ -8,11 +8,15 @@ import UploadPDF from './components/UploadPDF';
 import MyNFTs from './components/MyNFTs';
 import ViewPDF from './components/ViewPDF';
 import Settings from './components/Settings';
+import Notes from './components/Notes';
 import UserInvoices from './components/UserInvoices';
 import ProtectedRoute from './components/ProtectedRoute';
 import AdminLogin from './components/admin/AdminLogin';
 import AdminDashboard from './components/admin/AdminDashboard';
 import AdminProtectedRoute from './components/admin/AdminProtectedRoute';
+import TermsOfService from './components/legal/TermsOfService';
+import PrivacyPolicy from './components/legal/PrivacyPolicy';
+import EarlyAdopterAgreement from './components/legal/EarlyAdopterAgreement';
 
 function App() {
   return (
@@ -22,6 +26,9 @@ function App() {
             {/* Public Routes */}
             <Route path="/signin" element={<SignIn />} />
             <Route path="/signup" element={<SignUp />} />
+            <Route path="/terms" element={<TermsOfService />} />
+            <Route path="/privacy" element={<PrivacyPolicy />} />
+            <Route path="/early-adopter" element={<EarlyAdopterAgreement />} />
             
             {/* Admin Routes */}
             <Route path="/admin" element={<Navigate to="/signin" replace />} />
@@ -48,6 +55,7 @@ function App() {
               <Route path="upload" element={<UploadPDF />} />
               <Route path="my-nfts" element={<MyNFTs />} />
               <Route path="invoices" element={<UserInvoices />} />
+              <Route path="notes" element={<Notes />} />
               <Route path="settings" element={<Settings />} />
               <Route path="view/:tokenId" element={<ViewPDF />} />
             </Route>

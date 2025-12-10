@@ -84,9 +84,20 @@ export const getAllUsers = async (req, res) => {
     // Get total count
     const total = await User.countDocuments(searchQuery);
 
+    // Map users to ensure id is always a string
+    const mappedUsers = users.map(user => ({
+      id: user._id.toString(),
+      email: user.email,
+      name: user.name || '',
+      walletAddress: user.walletAddress || null,
+      createdAt: user.createdAt,
+      updatedAt: user.updatedAt,
+      role: user.role || 'user'
+    }));
+
     res.status(200).json({
       success: true,
-      users,
+      users: mappedUsers,
       pagination: {
         page,
         limit,
@@ -104,15 +115,56 @@ export const getAllUsers = async (req, res) => {
 export const getUserById = async (req, res) => {
   try {
     const { userId } = req.params;
-    const user = await User.findById(userId).select('-password');
+    const user = await User.findById(userId)
+      .select('-password')
+      .populate('referredBy', 'name email referralCode');
 
     if (!user) {
       return res.status(404).json({ error: 'User not found' });
     }
 
+    // Get users referred by this user
+    const referredUsers = await User.find({ referredBy: userId })
+      .select('name email createdAt')
+      .limit(10)
+      .sort({ createdAt: -1 });
+
+    const userObj = user.toObject();
+    
     res.status(200).json({
       success: true,
-      user
+      user: {
+        id: userObj._id.toString(),
+        email: userObj.email,
+        name: userObj.name,
+        walletAddress: userObj.walletAddress || null,
+        createdAt: userObj.createdAt,
+        accessCode: userObj.accessCode || null,
+        referralCode: userObj.referralCode || null,
+        referredBy: userObj.referredBy ? {
+          id: userObj.referredBy._id?.toString() || userObj.referredBy.id,
+          name: userObj.referredBy.name || '',
+          email: userObj.referredBy.email || '',
+          referralCode: userObj.referredBy.referralCode || ''
+        } : null,
+        referredUsers: referredUsers.map(u => ({
+          id: u._id.toString(),
+          name: u.name || '',
+          email: u.email || '',
+          createdAt: u.createdAt
+        })),
+        subscriptionPlan: userObj.subscriptionPlan || null,
+        subscriptionStatus: userObj.subscriptionStatus || 'inactive',
+        subscriptionStartDate: userObj.subscriptionStartDate || null,
+        subscriptionEndDate: userObj.subscriptionEndDate || null,
+        isSuspended: userObj.isSuspended || false,
+        suspendedAt: userObj.suspendedAt || null,
+        suspendedReason: userObj.suspendedReason || '',
+        adminNotes: userObj.adminNotes || '',
+        profileComplete: userObj.profileComplete || false,
+        totalFileSizeUsed: userObj.totalFileSizeUsed || 0,
+        fileSizeLimit: userObj.fileSizeLimit || (250 * 1024 * 1024)
+      }
     });
   } catch (error) {
     console.error('Error fetching user:', error);
@@ -130,30 +182,52 @@ export const getUserNFTDetails = async (req, res) => {
       return res.status(404).json({ error: 'User not found' });
     }
 
-    if (!user.walletAddress) {
-      return res.status(200).json({
-        success: true,
-        user: {
-          id: user._id.toString(),
-          email: user.email,
-          name: user.name,
-          walletAddress: null
-        },
-        nftCount: 0,
-        nfts: [],
-        pdfReports: []
-      });
-    }
+    // Import NFT model
+    const NFT = (await import('../models/NFT.js')).default;
+    const mongoose = (await import('mongoose')).default;
 
-    const provider = new ethers.JsonRpcProvider(
-      process.env.POLYGON_MAINNET_RPC_URL || 'https://polygon-rpc.com'
-    );
+    // Query NFTs from database by userId (primary method)
+    const userIdObjectId = new mongoose.Types.ObjectId(userId);
+    const dbNFTs = await NFT.find({ userId: userIdObjectId })
+      .sort({ createdAt: -1 });
 
-    let nftCount = 0;
+    let nftCount = dbNFTs.length;
     let nfts = [];
+    let pdfReports = [];
 
-    if (contractAddress) {
+    // Calculate total file size used from NFTs
+    let totalFileSizeUsed = 0;
+    if (dbNFTs.length > 0) {
+      totalFileSizeUsed = dbNFTs.reduce((sum, nft) => sum + (nft.fileSize || 0), 0);
+      
+      nfts = dbNFTs.map(nft => ({
+        tokenId: nft.tokenId,
+        tokenURI: nft.arweaveUrl || nft.supabaseUrl || `https://arweave.net/${nft.arweaveId}` || ''
+      }));
+
+      pdfReports = dbNFTs.map(nft => ({
+        id: nft._id.toString(),
+        tokenId: nft.tokenId,
+        name: nft.originalName || `PDF Document #${nft.tokenId}`,
+        mintedAt: nft.createdAt,
+        fileSize: nft.fileSize ? `${(nft.fileSize / (1024 * 1024)).toFixed(2)} MB` : 'N/A',
+        status: 'Active',
+        metadataUrl: nft.arweaveUrl || nft.supabaseUrl || ''
+      }));
+    }
+    
+    // Use user's totalFileSizeUsed if available, otherwise calculate from NFTs
+    const calculatedFileSizeUsed = user.totalFileSizeUsed !== undefined && user.totalFileSizeUsed !== null 
+      ? user.totalFileSizeUsed 
+      : totalFileSizeUsed;
+    
+    // Fallback: If no database NFTs found but user has wallet, check blockchain
+    if (dbNFTs.length === 0 && user.walletAddress && contractAddress) {
       try {
+        const provider = new ethers.JsonRpcProvider(
+          process.env.POLYGON_MAINNET_RPC_URL || 'https://polygon-rpc.com'
+        );
+
         const contract = new ethers.Contract(
           contractAddress,
           [
@@ -181,21 +255,21 @@ export const getUserNFTDetails = async (req, res) => {
             console.error(`Error fetching NFT ${i}:`, error.message);
           }
         }
+
+        // Generate PDF reports from blockchain data
+        pdfReports = nfts.map((nft, index) => ({
+          id: nft.tokenId,
+          tokenId: nft.tokenId,
+          name: `PDF Document #${nft.tokenId}`,
+          mintedAt: user.createdAt,
+          fileSize: 'N/A',
+          status: 'Active',
+          metadataUrl: nft.tokenURI
+        }));
       } catch (error) {
-        console.warn('Could not fetch NFT data:', error.message);
+        console.warn('Could not fetch NFT data from blockchain:', error.message);
       }
     }
-
-    // Generate PDF reports (mock data structure - in production, you'd track this)
-    const pdfReports = nfts.map((nft, index) => ({
-      id: nft.tokenId,
-      tokenId: nft.tokenId,
-      name: `PDF Document #${nft.tokenId}`,
-      mintedAt: user.createdAt, // In production, track actual mint date
-      fileSize: 'N/A', // Would need to fetch from metadata
-      status: 'Active',
-      metadataUrl: nft.tokenURI
-    }));
 
     res.status(200).json({
       success: true,
@@ -203,8 +277,20 @@ export const getUserNFTDetails = async (req, res) => {
         id: user._id.toString(),
         email: user.email,
         name: user.name,
-        walletAddress: user.walletAddress,
-        createdAt: user.createdAt
+        walletAddress: user.walletAddress || null,
+        createdAt: user.createdAt,
+        accessCode: user.accessCode || null,
+        referralCode: user.referralCode || null,
+        subscriptionPlan: user.subscriptionPlan || null,
+        subscriptionStatus: user.subscriptionStatus || 'inactive',
+        subscriptionStartDate: user.subscriptionStartDate || null,
+        subscriptionEndDate: user.subscriptionEndDate || null,
+        isSuspended: user.isSuspended || false,
+        suspendedAt: user.suspendedAt || null,
+        suspendedReason: user.suspendedReason || '',
+        adminNotes: user.adminNotes || '',
+        totalFileSizeUsed: calculatedFileSizeUsed,
+        fileSizeLimit: user.fileSizeLimit || (250 * 1024 * 1024) // Default 250MB
       },
       nftCount,
       nfts,
@@ -357,6 +443,114 @@ export const deleteUser = async (req, res) => {
   } catch (error) {
     console.error('Error deleting user:', error);
     res.status(500).json({ error: error.message || 'Error deleting user' });
+  }
+};
+
+// Suspend user
+export const suspendUser = async (req, res) => {
+  try {
+    const { userId } = req.params;
+    const { reason } = req.body;
+
+    const user = await User.findById(userId);
+    if (!user) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+
+    if (user.role === 'admin') {
+      return res.status(403).json({ error: 'Cannot suspend admin users' });
+    }
+
+    user.isSuspended = true;
+    user.suspendedAt = new Date();
+    user.suspendedReason = reason || '';
+    user.updatedAt = Date.now();
+    await user.save();
+
+    res.status(200).json({
+      success: true,
+      message: 'User suspended successfully',
+      user: {
+        id: user._id.toString(),
+        email: user.email,
+        name: user.name,
+        isSuspended: user.isSuspended,
+        suspendedAt: user.suspendedAt,
+        suspendedReason: user.suspendedReason
+      }
+    });
+  } catch (error) {
+    console.error('Error suspending user:', error);
+    res.status(500).json({ error: error.message || 'Error suspending user' });
+  }
+};
+
+// Unsuspend user
+export const unsuspendUser = async (req, res) => {
+  try {
+    const { userId } = req.params;
+
+    const user = await User.findById(userId);
+    if (!user) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+
+    user.isSuspended = false;
+    user.suspendedAt = null;
+    user.suspendedReason = '';
+    user.updatedAt = Date.now();
+    await user.save();
+
+    res.status(200).json({
+      success: true,
+      message: 'User unsuspended successfully',
+      user: {
+        id: user._id.toString(),
+        email: user.email,
+        name: user.name,
+        isSuspended: user.isSuspended
+      }
+    });
+  } catch (error) {
+    console.error('Error unsuspending user:', error);
+    res.status(500).json({ error: error.message || 'Error unsuspending user' });
+  }
+};
+
+// Update user notes
+export const updateUserNotes = async (req, res) => {
+  try {
+    const { userId } = req.params;
+    const { adminNotes } = req.body;
+
+    const user = await User.findById(userId);
+    if (!user) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+
+    // Only update adminNotesUpdatedAt if notes actually changed
+    const notesChanged = user.adminNotes !== (adminNotes || '');
+    user.adminNotes = adminNotes || '';
+    user.updatedAt = Date.now();
+    if (notesChanged) {
+      user.adminNotesUpdatedAt = new Date();
+    }
+    await user.save();
+
+    res.status(200).json({
+      success: true,
+      message: 'User notes updated successfully',
+      user: {
+        id: user._id.toString(),
+        email: user.email,
+        name: user.name,
+        adminNotes: user.adminNotes,
+        adminNotesUpdatedAt: user.adminNotesUpdatedAt
+      }
+    });
+  } catch (error) {
+    console.error('Error updating user notes:', error);
+    res.status(500).json({ error: error.message || 'Error updating user notes' });
   }
 };
 

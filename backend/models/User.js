@@ -73,6 +73,111 @@ const userSchema = new mongoose.Schema({
     enum: ['user', 'admin'],
     default: 'user'
   },
+  subscriptionStatus: {
+    type: String,
+    enum: ['active', 'expired', 'inactive'],
+    default: 'inactive'
+  },
+  subscriptionStartDate: {
+    type: Date,
+    default: null
+  },
+  subscriptionEndDate: {
+    type: Date,
+    default: null
+  },
+  totalFileSizeUsed: {
+    type: Number, // in bytes
+    default: 0
+  },
+  fileSizeLimit: {
+    type: Number, // in bytes (250MB = 250 * 1024 * 1024)
+    default: 250 * 1024 * 1024 // 250MB default
+  },
+  lastSubscriptionInvoiceId: {
+    type: String,
+    default: null
+  },
+  // Access code used during registration
+  accessCode: {
+    type: String,
+    default: null
+  },
+  // Referral system
+  referredBy: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'User',
+    default: null
+  },
+  referralCode: {
+    type: String,
+    unique: true,
+    sparse: true,
+    default: null
+  },
+  // Agreement tracking
+  agreedToTerms: {
+    type: Boolean,
+    default: false
+  },
+  agreedToPrivacy: {
+    type: Boolean,
+    default: false
+  },
+  agreedToEarlyAdopter: {
+    type: Boolean,
+    default: false
+  },
+  agreementDates: {
+    terms: { type: Date, default: null },
+    privacy: { type: Date, default: null },
+    earlyAdopter: { type: Date, default: null }
+  },
+  // Profile completion status
+  profileComplete: {
+    type: Boolean,
+    default: false
+  },
+  // Additional address fields for international support
+  state: {
+    type: String,
+    default: ''
+  },
+  province: {
+    type: String,
+    default: ''
+  },
+  // Admin management fields
+  adminNotes: {
+    type: String,
+    default: ''
+  },
+  adminNotesUpdatedAt: {
+    type: Date,
+    default: null
+  },
+  adminNotesLastReadAt: {
+    type: Date,
+    default: null
+  },
+  isSuspended: {
+    type: Boolean,
+    default: false
+  },
+  suspendedAt: {
+    type: Date,
+    default: null
+  },
+  suspendedReason: {
+    type: String,
+    default: ''
+  },
+  // Subscription plan (from access code or manual assignment)
+  subscriptionPlan: {
+    type: String,
+    enum: ['basic', 'monthly', 'yearly', 'lifetime', null],
+    default: null
+  },
   createdAt: {
     type: Date,
     default: Date.now
@@ -88,15 +193,16 @@ const userSchema = new mongoose.Schema({
 
 // Hash password before saving
 userSchema.pre('save', async function(next) {
-  if (!this.isModified('password')) {
-    // Update updatedAt if not password change
-    if (this.isModified() && !this.isNew) {
-      this.updatedAt = Date.now();
-    }
-    return next();
+  // Hash password if modified
+  if (this.isModified('password')) {
+    this.password = await bcrypt.hash(this.password, 10);
   }
-  this.password = await bcrypt.hash(this.password, 10);
-  this.updatedAt = Date.now();
+  
+  // Update updatedAt if modified
+  if (this.isModified() && !this.isNew) {
+    this.updatedAt = Date.now();
+  }
+  
   next();
 });
 

@@ -131,7 +131,7 @@ const MyNFTs = () => {
                   className="btn-primary w-full inline-flex items-center justify-center"
                 >
                   <Eye className="mr-2 h-4 w-4" />
-                  View PDF
+                  Download PDF
                 </button>
               </div>
             </div>

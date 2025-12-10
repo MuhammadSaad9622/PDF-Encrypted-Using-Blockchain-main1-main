@@ -23,6 +23,7 @@ import pdfRoutes from './routes/pdfRoutes.js';
 import authRoutes from './routes/authRoutes.js';
 import statsRoutes from './routes/statsRoutes.js';
 import adminRoutes from './routes/adminRoutes.js';
+import paymentRoutes from './routes/paymentRoutes.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -61,7 +62,7 @@ app.use(express.json());
 app.use(fileUpload({
   useTempFiles: true,
   tempFileDir: tempDir,
-  limits: { fileSize: 50 * 1024 * 1024 }, // 50MB limit
+  limits: { fileSize: 250 * 1024 * 1024 }, // 250MB limit
 }));
 
 // Log incoming requests
@@ -74,6 +75,7 @@ app.use((req, res, next) => {
 app.use('/api/auth', authRoutes);
 app.use('/api/stats', statsRoutes);
 app.use('/api/admin', adminRoutes);
+app.use('/api/payments', paymentRoutes);
 app.use('/api', pdfRoutes);
 
 // Middleware to check MongoDB connection (only for routes that need it)

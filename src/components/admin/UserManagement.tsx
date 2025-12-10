@@ -119,15 +119,14 @@ const UserManagement = ({ onViewUserDetails }: UserManagementProps) => {
               <tr>
                 <th className="text-left py-4 px-6 text-gray-300 font-semibold">User</th>
                 <th className="text-left py-4 px-6 text-gray-300 font-semibold">Email</th>
-                <th className="text-left py-4 px-6 text-gray-300 font-semibold">Wallet</th>
                 <th className="text-left py-4 px-6 text-gray-300 font-semibold">Joined</th>
                 <th className="text-left py-4 px-6 text-gray-300 font-semibold">Actions</th>
               </tr>
             </thead>
             <tbody>
-              {users.map((user) => (
+              {users.map((user, index) => (
                 <tr
-                  key={user.id}
+                  key={user.id || `user-${index}-${user.email}`}
                   className="border-b border-gray-800 hover:bg-gray-800/30 transition-colors"
                 >
                   <td className="py-4 px-6">
@@ -152,18 +151,6 @@ const UserManagement = ({ onViewUserDetails }: UserManagementProps) => {
                     </div>
                   </td>
                   <td className="py-4 px-6">
-                    {user.walletAddress ? (
-                      <div className="flex items-center space-x-2">
-                        <Wallet className="h-4 w-4 text-green-400" />
-                        <span className="text-green-400 text-sm font-mono">
-                          {user.walletAddress.slice(0, 8)}...{user.walletAddress.slice(-6)}
-                        </span>
-                      </div>
-                    ) : (
-                      <span className="text-gray-500 text-sm">Not connected</span>
-                    )}
-                  </td>
-                  <td className="py-4 px-6">
                     <div className="flex items-center space-x-2 text-gray-400 text-sm">
                       <Calendar className="h-4 w-4" />
                       <span>{new Date(user.createdAt).toLocaleDateString()}</span>
@@ -173,7 +160,24 @@ const UserManagement = ({ onViewUserDetails }: UserManagementProps) => {
                     <div className="flex items-center space-x-2">
                       {onViewUserDetails && (
                         <button
-                          onClick={() => onViewUserDetails(user.id)}
+                          onClick={() => {
+                            console.log('👁️ Eye button clicked for user:', user);
+                            // Try multiple possible ID fields
+                            const userId = user.id || (user as any)._id || (user as any).userId;
+                            console.log('👁️ User ID fields:', { id: user.id, _id: (user as any)._id, userId: (user as any).userId });
+                            console.log('👁️ Selected User ID:', userId, 'type:', typeof userId);
+                            
+                            if (!userId) {
+                              console.error('❌ User ID is missing from all fields!', user);
+                              alert('Error: User ID is missing. Please refresh the page.');
+                              return;
+                            }
+                            
+                            // Ensure it's a string
+                            const userIdString = String(userId);
+                            console.log('👁️ Calling onViewUserDetails with:', userIdString);
+                            onViewUserDetails(userIdString);
+                          }}
                           className="p-2 text-purple-400 hover:bg-purple-500/20 rounded-lg transition-colors"
                           title="View user details"
                         >

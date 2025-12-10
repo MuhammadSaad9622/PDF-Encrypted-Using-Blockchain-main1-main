@@ -14,12 +14,14 @@ import {
   X,
   Shield,
   Receipt,
-  UserCircle
+  UserCircle,
+  Key
 } from 'lucide-react';
 import { adminApi } from '../../utils/api';
 import UserManagement from './UserManagement';
 import BillingInvoices from './BillingInvoices';
 import UserDetails from './UserDetails';
+import AccessCodeManagement from './AccessCodeManagement';
 
 interface DashboardStats {
   overview: {
@@ -47,9 +49,19 @@ const AdminDashboard = () => {
   const [analytics, setAnalytics] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [sidebarOpen, setSidebarOpen] = useState(true);
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'users' | 'analytics' | 'billing' | 'user-details'>('dashboard');
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'users' | 'analytics' | 'billing' | 'access-codes' | 'user-details'>('dashboard');
   const [adminUser, setAdminUser] = useState<any>(null);
   const [selectedUserId, setSelectedUserId] = useState<string | null>(null);
+  const [pendingUserId, setPendingUserId] = useState<string | null>(null);
+
+  // Handle tab change when userId is set
+  useEffect(() => {
+    if (pendingUserId && selectedUserId === pendingUserId) {
+      console.log('✅ selectedUserId matches pendingUserId, changing tab');
+      setActiveTab('user-details');
+      setPendingUserId(null);
+    }
+  }, [selectedUserId, pendingUserId]);
 
   useEffect(() => {
     const storedAdmin = localStorage.getItem('adminUser');
@@ -98,6 +110,7 @@ const AdminDashboard = () => {
     { icon: LayoutDashboard, label: 'Dashboard', tab: 'dashboard' as const },
     { icon: BarChart3, label: 'Analytics', tab: 'analytics' as const },
     { icon: UserCog, label: 'User Management', tab: 'users' as const },
+    { icon: Key, label: 'Access Codes', tab: 'access-codes' as const },
     { icon: Receipt, label: 'Billing & Invoices', tab: 'billing' as const },
   ];
 
@@ -146,7 +159,7 @@ const AdminDashboard = () => {
               const isActive = activeTab === item.tab;
               return (
                 <button
-                  key={item.tab}
+                  key={item.tab || item.label}
                   onClick={() => setActiveTab(item.tab)}
                   className={`w-full flex items-center space-x-3 px-4 py-3 rounded-lg transition-colors ${
                     isActive
@@ -290,7 +303,6 @@ const AdminDashboard = () => {
                         <tr className="border-b border-gray-700">
                           <th className="text-left py-3 px-4 text-gray-400 font-semibold">Email</th>
                           <th className="text-left py-3 px-4 text-gray-400 font-semibold">Name</th>
-                          <th className="text-left py-3 px-4 text-gray-400 font-semibold">Wallet</th>
                           <th className="text-left py-3 px-4 text-gray-400 font-semibold">Joined</th>
                         </tr>
                       </thead>
@@ -299,15 +311,6 @@ const AdminDashboard = () => {
                           <tr key={user.id} className="border-b border-gray-800 hover:bg-gray-800/50">
                             <td className="py-3 px-4 text-white">{user.email}</td>
                             <td className="py-3 px-4 text-gray-300">{user.name || 'N/A'}</td>
-                            <td className="py-3 px-4">
-                              {user.walletAddress ? (
-                                <span className="text-green-400 text-sm font-mono">
-                                  {user.walletAddress.slice(0, 6)}...{user.walletAddress.slice(-4)}
-                                </span>
-                              ) : (
-                                <span className="text-gray-500 text-sm">Not connected</span>
-                              )}
-                            </td>
                             <td className="py-3 px-4 text-gray-400 text-sm">
                               {new Date(user.createdAt).toLocaleDateString()}
                             </td>
@@ -329,21 +332,52 @@ const AdminDashboard = () => {
 
           {activeTab === 'users' && (
             <UserManagement onViewUserDetails={(userId) => {
+              console.log('👁️ Eye button clicked - userId:', userId, 'type:', typeof userId);
+              if (!userId) {
+                console.error('❌ userId is falsy!', userId);
+                alert('Error: User ID is missing. Please try again.');
+                return;
+              }
+              // Set pending userId first, then selectedUserId
+              // useEffect will handle the tab change when selectedUserId is set
+              console.log('📝 Setting pendingUserId and selectedUserId to:', userId);
+              setPendingUserId(userId);
               setSelectedUserId(userId);
-              setActiveTab('user-details');
             }} />
           )}
 
           {activeTab === 'billing' && <BillingInvoices />}
 
-          {activeTab === 'user-details' && selectedUserId && (
-            <UserDetails 
-              userId={selectedUserId}
-              onBack={() => {
-                setActiveTab('users');
-                setSelectedUserId(null);
-              }}
-            />
+          {activeTab === 'access-codes' && <AccessCodeManagement />}
+
+          {activeTab === 'user-details' && (
+            <>
+              {selectedUserId ? (
+                <UserDetails 
+                  userId={selectedUserId}
+                  onBack={() => {
+                    console.log('🔙 Back button clicked');
+                    setActiveTab('users');
+                    setSelectedUserId(null);
+                  }}
+                />
+              ) : (
+                <div className="card-dark text-center py-12 bg-yellow-900/20 border-2 border-yellow-500/50">
+                  <p className="text-yellow-400 text-lg font-semibold mb-4">⚠️ No User Selected</p>
+                  <p className="text-gray-300 mb-2">selectedUserId is: {String(selectedUserId) || 'null/undefined'}</p>
+                  <p className="text-gray-400 mb-6">Please select a user from User Management to view details.</p>
+                  <button
+                    onClick={() => {
+                      console.log('🔄 Going to User Management');
+                      setActiveTab('users');
+                    }}
+                    className="btn-primary"
+                  >
+                    Go to User Management
+                  </button>
+                </div>
+              )}
+            </>
           )}
         </main>
       </div>
@@ -371,7 +405,7 @@ const AnalyticsView = ({ analytics }: AnalyticsViewProps) => {
             {analytics.users.monthlyGrowth.map((item: any, index: number) => {
               const percentage = (item.count / maxGrowth) * 100;
               return (
-                <div key={index} className="space-y-2">
+                <div key={`growth-${index}-${item.month || index}`} className="space-y-2">
                   <div className="flex justify-between items-center">
                     <span className="text-sm text-gray-300">{item.month}</span>
                     <span className="text-sm font-semibold text-white">{item.count} users</span>

@@ -1282,6 +1282,33 @@ export const automatedUploadAndMint = async (req, res) => {
       return res.status(401).json({ error: 'Authentication required' });
     }
 
+    // Check subscription status
+    const User = (await import('../models/User.js')).default;
+    const user = await User.findById(userId);
+    if (!user) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+
+    // Check if user has active subscription
+    if (user.subscriptionStatus !== 'active') {
+      return res.status(403).json({ 
+        error: 'Active subscription required. Please subscribe to upload files.',
+        requiresSubscription: true,
+        currentStatus: user.subscriptionStatus
+      });
+    }
+
+    // Check if subscription has expired
+    if (user.subscriptionEndDate && new Date() > user.subscriptionEndDate) {
+      user.subscriptionStatus = 'expired';
+      await user.save();
+      return res.status(403).json({ 
+        error: 'Your subscription has expired. Please renew your subscription to continue uploading files.',
+        requiresSubscription: true,
+        expiredDate: user.subscriptionEndDate
+      });
+    }
+
     const { recipientAddress, name, description } = req.body;
 
     // If no recipientAddress provided, use backend wallet address
@@ -1299,6 +1326,23 @@ export const automatedUploadAndMint = async (req, res) => {
     }
 
     const pdfFile = req.files.pdf;
+    const fileSizeBytes = pdfFile.size;
+    
+    // Check file size limit
+    const maxSize = user.fileSizeLimit || (250 * 1024 * 1024); // 250MB
+    const currentUsed = user.totalFileSizeUsed || 0;
+
+    if (currentUsed + fileSizeBytes > maxSize) {
+      const remainingMB = ((maxSize - currentUsed) / (1024 * 1024)).toFixed(2);
+      return res.status(403).json({ 
+        error: `File size limit exceeded. You have ${remainingMB} MB remaining out of ${(maxSize / (1024 * 1024))} MB limit.`,
+        currentUsed: currentUsed,
+        fileSize: fileSizeBytes,
+        limit: maxSize,
+        remaining: maxSize - currentUsed
+      });
+    }
+
     const fileId = crypto.randomUUID();
     const originalFilePath = path.join(tempDir, `${fileId}_original.pdf`);
     const encryptedFilePath = path.join(tempDir, `${fileId}_encrypted.pdf`);
@@ -1474,11 +1518,18 @@ export const automatedUploadAndMint = async (req, res) => {
             arweaveUrl: arweaveUrl,
             recipientAddress: finalRecipientAddress,
             userId: new mongoose.Types.ObjectId(userId), // Link NFT to user account
-            originalName: pdfFile.name // Store original file name
+            originalName: pdfFile.name, // Store original file name
+            fileSize: fileSizeBytes // Store original file size in bytes
           },
           { upsert: true, new: true }
         );
         console.log(`✅ Stored NFT details in database for tokenId ${mintResult.tokenId} linked to userId ${userId}`);
+        
+        // Update user's total file size used
+        await User.findByIdAndUpdate(userId, {
+          $inc: { totalFileSizeUsed: fileSizeBytes }
+        });
+        console.log(`✅ Updated user's total file size: ${currentUsed + fileSizeBytes} bytes (${((currentUsed + fileSizeBytes) / (1024 * 1024)).toFixed(2)} MB)`);
       } catch (dbError) {
         console.error('⚠️ Failed to store NFT details in database (non-critical):', dbError.message);
         // Don't fail the entire operation if database storage fails

@@ -1,4 +1,5 @@
 import User from '../models/User.js';
+import AccessCode from '../models/AccessCode.js';
 import jwt from 'jsonwebtoken';
 import { ethers } from 'ethers';
 import { contractAddress } from '../utils/wallet.js';
@@ -17,15 +18,58 @@ const generateToken = (userId, role = null) => {
 // Sign up
 export const signup = async (req, res) => {
   try {
-    const { email, password, name } = req.body;
+    const { 
+      email, 
+      password, 
+      name,
+      accessCode,
+      referralCode,
+      phone,
+      address,
+      city,
+      state,
+      province,
+      country,
+      zipCode,
+      agreedToTerms,
+      agreedToPrivacy,
+      agreedToEarlyAdopter
+    } = req.body;
 
-    // Validate input
+    // Validate required fields
     if (!email || !password) {
       return res.status(400).json({ error: 'Email and password are required' });
     }
 
     if (password.length < 6) {
       return res.status(400).json({ error: 'Password must be at least 6 characters long' });
+    }
+
+    // Validate access code
+    if (!accessCode) {
+      return res.status(400).json({ error: 'Access code is required' });
+    }
+
+    const normalizedAccessCode = accessCode.toUpperCase().trim();
+    const accessCodeDoc = await AccessCode.findOne({ code: normalizedAccessCode });
+
+    if (!accessCodeDoc) {
+      return res.status(400).json({ error: 'Invalid access code' });
+    }
+
+    const accessCodeValidation = accessCodeDoc.isValid();
+    if (!accessCodeValidation.valid) {
+      return res.status(400).json({ error: accessCodeValidation.reason });
+    }
+
+    // Validate agreements
+    if (!agreedToTerms || !agreedToPrivacy || !agreedToEarlyAdopter) {
+      return res.status(400).json({ error: 'You must agree to all terms, privacy policy, and early adopter access' });
+    }
+
+    // Validate required profile fields
+    if (!name || !phone || !address || !city || !country || !zipCode) {
+      return res.status(400).json({ error: 'All profile fields are required: name, phone, address, city, country, and zip code' });
     }
 
     // Normalize email (lowercase and trim)
@@ -37,14 +81,97 @@ export const signup = async (req, res) => {
       return res.status(400).json({ error: 'User with this email already exists' });
     }
 
-    // Create new user (use normalized email)
+    // Validate referral code if provided
+    let referredBy = null;
+    if (referralCode) {
+      const normalizedReferralCode = referralCode.toUpperCase().trim();
+      const referrer = await User.findOne({ referralCode: normalizedReferralCode });
+      
+      if (!referrer) {
+        return res.status(400).json({ error: 'Invalid referral code' });
+      }
+      
+      // Prevent self-referral (though this shouldn't happen for new users)
+      if (referrer.email === normalizedEmail) {
+        return res.status(400).json({ error: 'Cannot refer yourself' });
+      }
+      
+      referredBy = referrer._id;
+    }
+
+    // Generate unique referral code for new user
+    let userReferralCode;
+    let isUnique = false;
+    while (!isUnique) {
+      userReferralCode = Math.random().toString(36).substring(2, 10).toUpperCase();
+      const existing = await User.findOne({ referralCode: userReferralCode });
+      if (!existing) {
+        isUnique = true;
+      }
+    }
+
+    // Create new user with all fields
+    const now = new Date();
+    
+    // Determine subscription based on access code
+    let subscriptionPlan = null;
+    let subscriptionStatus = 'inactive';
+    let subscriptionStartDate = null;
+    let subscriptionEndDate = null;
+    
+    if (accessCodeDoc.subscriptionPlan) {
+      subscriptionPlan = accessCodeDoc.subscriptionPlan;
+      subscriptionStatus = 'active';
+      subscriptionStartDate = now;
+      
+      // Calculate end date based on plan
+      const duration = accessCodeDoc.subscriptionDuration || 
+        (subscriptionPlan === 'monthly' ? 30 : 
+         subscriptionPlan === 'yearly' ? 365 : 
+         subscriptionPlan === 'lifetime' ? null : null);
+      
+      if (duration) {
+        subscriptionEndDate = new Date(now);
+        subscriptionEndDate.setDate(subscriptionEndDate.getDate() + duration);
+      } else if (subscriptionPlan === 'lifetime') {
+        // Lifetime subscription - no end date
+        subscriptionEndDate = null;
+      }
+    }
+    
     const user = new User({
       email: normalizedEmail,
       password,
-      name: name || ''
+      name: name.trim(),
+      phone: phone.trim(),
+      address: address.trim(),
+      city: city.trim(),
+      state: state ? state.trim() : '',
+      province: province ? province.trim() : '',
+      country: country.trim(),
+      zipCode: zipCode.trim(),
+      accessCode: normalizedAccessCode,
+      referredBy: referredBy,
+      referralCode: userReferralCode,
+      agreedToTerms: true,
+      agreedToPrivacy: true,
+      agreedToEarlyAdopter: true,
+      agreementDates: {
+        terms: now,
+        privacy: now,
+        earlyAdopter: now
+      },
+      profileComplete: true,
+      subscriptionPlan: subscriptionPlan,
+      subscriptionStatus: subscriptionStatus,
+      subscriptionStartDate: subscriptionStartDate,
+      subscriptionEndDate: subscriptionEndDate
     });
 
     await user.save();
+
+    // Increment access code usage
+    await accessCodeDoc.incrementUsage();
 
     // Generate token (convert _id to string)
     const token = generateToken(user._id.toString(), user.role);
@@ -57,7 +184,9 @@ export const signup = async (req, res) => {
         email: user.email,
         name: user.name,
         walletAddress: user.walletAddress,
-        role: user.role || 'user'
+        role: user.role || 'user',
+        referralCode: user.referralCode,
+        profileComplete: user.profileComplete
       }
     });
   } catch (error) {
@@ -108,6 +237,15 @@ export const signin = async (req, res) => {
     const user = await User.findOne({ email: normalizedEmail });
     if (!user) {
       return res.status(401).json({ error: 'Invalid email or password' });
+    }
+
+    // Check if user is suspended
+    if (user.isSuspended) {
+      return res.status(403).json({ 
+        error: 'Your account has been suspended',
+        suspended: true,
+        reason: user.suspendedReason || 'No reason provided'
+      });
     }
 
     // Check if user has a password set
@@ -352,5 +490,58 @@ export const updateProfile = async (req, res) => {
   } catch (error) {
     console.error('Update profile error:', error);
     res.status(500).json({ error: error.message || 'Error updating profile' });
+  }
+};
+
+// Get user notes (admin notes for the user)
+export const getUserNotes = async (req, res) => {
+  try {
+    const userId = req.userId;
+    
+    const user = await User.findById(userId);
+    if (!user) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+
+    const notes = user.adminNotes || '';
+    const updatedAt = user.adminNotesUpdatedAt || null;
+    const lastReadAt = user.adminNotesLastReadAt || null;
+    
+    // Check if there are new notes (updated after last read)
+    const hasNewNotes = updatedAt && (!lastReadAt || new Date(updatedAt) > new Date(lastReadAt));
+
+    res.status(200).json({
+      notes,
+      updatedAt,
+      lastReadAt,
+      hasNewNotes
+    });
+  } catch (error) {
+    console.error('Get user notes error:', error);
+    res.status(500).json({ error: error.message || 'Error getting user notes' });
+  }
+};
+
+// Mark notes as read
+export const markNotesAsRead = async (req, res) => {
+  try {
+    const userId = req.userId;
+    
+    const user = await User.findById(userId);
+    if (!user) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+
+    // Update last read timestamp
+    user.adminNotesLastReadAt = new Date();
+    await user.save();
+
+    res.status(200).json({
+      success: true,
+      message: 'Notes marked as read'
+    });
+  } catch (error) {
+    console.error('Mark notes as read error:', error);
+    res.status(500).json({ error: error.message || 'Error marking notes as read' });
   }
 };

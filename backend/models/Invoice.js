@@ -4,8 +4,12 @@ const invoiceSchema = new mongoose.Schema({
   invoiceId: {
     type: String,
     required: true,
+    unique: true
+  },
+  invoiceNumber: {
+    type: String,
     unique: true,
-    index: true
+    sparse: true // Only enforce uniqueness for non-null values
   },
   userId: {
     type: mongoose.Schema.Types.ObjectId,
@@ -15,8 +19,8 @@ const invoiceSchema = new mongoose.Schema({
   },
   subscriptionPlan: {
     type: String,
-    enum: ['monthly', 'yearly', 'lifetime'],
-    default: 'monthly'
+    enum: ['basic', 'monthly', 'yearly', 'lifetime'],
+    default: 'basic'
   },
   amount: {
     type: Number,
@@ -24,7 +28,7 @@ const invoiceSchema = new mongoose.Schema({
   },
   currency: {
     type: String,
-    default: 'MATIC'
+    default: 'USD'
   },
   status: {
     type: String,
@@ -38,6 +42,15 @@ const invoiceSchema = new mongoose.Schema({
   paymentMethod: {
     type: String,
     default: 'blockchain'
+  },
+  squarePaymentId: {
+    type: String,
+    default: null,
+    index: true
+  },
+  squareOrderId: {
+    type: String,
+    default: null
   },
   subscriptionStartDate: {
     type: Date,
@@ -61,7 +74,7 @@ const invoiceSchema = new mongoose.Schema({
 
 // Create indexes
 invoiceSchema.index({ userId: 1, createdAt: -1 });
-invoiceSchema.index({ invoiceId: 1 });
+// Note: invoiceId index is automatically created by unique: true
 
 const Invoice = mongoose.model('Invoice', invoiceSchema);
 

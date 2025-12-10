@@ -44,11 +44,53 @@ export const apiCall = async (endpoint: string, options: RequestInit = {}) => {
 
 // Auth API calls
 export const authApi = {
-  signup: async (email: string, password: string, name?: string) => {
+  signup: async (signupData: {
+    email: string;
+    password: string;
+    name: string;
+    accessCode: string;
+    referralCode?: string;
+    phone: string;
+    address: string;
+    city: string;
+    state?: string;
+    province?: string;
+    country: string;
+    zipCode: string;
+    agreedToTerms: boolean;
+    agreedToPrivacy: boolean;
+    agreedToEarlyAdopter: boolean;
+  }) => {
     return apiCall('/api/auth/signup', {
       method: 'POST',
-      body: JSON.stringify({ email, password, name }),
+      body: JSON.stringify(signupData),
     });
+  },
+
+  validateAccessCode: async (code: string) => {
+    return apiCall('/api/auth/validate-access-code', {
+      method: 'POST',
+      body: JSON.stringify({ code }),
+    });
+  },
+
+  validateReferralCode: async (code: string) => {
+    return apiCall('/api/auth/validate-referral-code', {
+      method: 'POST',
+      body: JSON.stringify({ code }),
+    });
+  },
+
+  getReferralStats: async () => {
+    return apiCall('/api/auth/referral/stats');
+  },
+
+  getReferralHistory: async (page: number = 1, limit: number = 20) => {
+    const params = new URLSearchParams({
+      page: page.toString(),
+      limit: limit.toString(),
+    });
+    return apiCall(`/api/auth/referral/history?${params}`);
   },
   
   signin: async (email: string, password: string) => {
@@ -96,6 +138,16 @@ export const authApi = {
       limit: limit.toString(),
     });
     return apiCall(`/api/auth/invoices?${params}`);
+  },
+
+  getUserNotes: async () => {
+    return apiCall('/api/auth/notes');
+  },
+
+  markNotesAsRead: async () => {
+    return apiCall('/api/auth/notes/mark-read', {
+      method: 'POST',
+    });
   },
 };
 
@@ -321,7 +373,13 @@ export const pdfApi = {
     
     if (!response.ok) {
       const error = await response.json().catch(() => ({ error: 'Upload failed' }));
-      throw new Error(error.error || 'Upload failed');
+      // Preserve the full error message and status code
+      const errorMessage = error.error || 'Upload failed';
+      const apiError: any = new Error(errorMessage);
+      apiError.status = response.status;
+      apiError.requiresSubscription = error.requiresSubscription;
+      apiError.currentStatus = error.currentStatus;
+      throw apiError;
     }
     
     return response.json();
@@ -440,6 +498,38 @@ export const adminApi = {
     });
   },
 
+  suspendUser: async (userId: string, reason?: string) => {
+    const token = localStorage.getItem('adminToken');
+    return apiCall(`/api/admin/users/${userId}/suspend`, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${token}`,
+      },
+      body: JSON.stringify({ reason }),
+    });
+  },
+
+  unsuspendUser: async (userId: string) => {
+    const token = localStorage.getItem('adminToken');
+    return apiCall(`/api/admin/users/${userId}/unsuspend`, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${token}`,
+      },
+    });
+  },
+
+  updateUserNotes: async (userId: string, adminNotes: string) => {
+    const token = localStorage.getItem('adminToken');
+    return apiCall(`/api/admin/users/${userId}/notes`, {
+      method: 'PUT',
+      headers: {
+        'Authorization': `Bearer ${token}`,
+      },
+      body: JSON.stringify({ adminNotes }),
+    });
+  },
+
   getUserNFTDetails: async (userId: string) => {
     const token = localStorage.getItem('adminToken');
     const response = await fetch(`${API_BASE_URL}/api/admin/users/${userId}/nfts`, {
@@ -475,6 +565,99 @@ export const adminApi = {
     }
 
     return response.json();
+  },
+
+  // Access code management
+  createAccessCode: async (data: {
+    code: string;
+    maxUses?: number;
+    expiresAt?: string;
+    description?: string;
+  }) => {
+    const token = localStorage.getItem('adminToken');
+    return apiCall('/api/admin/access-codes', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${token}`,
+      },
+      body: JSON.stringify(data),
+    });
+  },
+
+  getAccessCodes: async (page: number = 1, limit: number = 20, isActive?: boolean) => {
+    const token = localStorage.getItem('adminToken');
+    const params = new URLSearchParams({
+      page: page.toString(),
+      limit: limit.toString(),
+      ...(isActive !== undefined && { isActive: isActive.toString() }),
+    });
+    const response = await fetch(`${API_BASE_URL}/api/admin/access-codes?${params}`, {
+      headers: {
+        'Authorization': `Bearer ${token}`,
+      },
+    });
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({ error: 'Failed to fetch access codes' }));
+      throw new Error(error.error || 'Failed to fetch access codes');
+    }
+    return response.json();
+  },
+
+  updateAccessCode: async (id: string, data: {
+    isActive?: boolean;
+    maxUses?: number;
+    expiresAt?: string;
+    description?: string;
+    subscriptionPlan?: string;
+    subscriptionDuration?: number;
+  }) => {
+    const token = localStorage.getItem('adminToken');
+    return apiCall(`/api/admin/access-codes/${id}`, {
+      method: 'PUT',
+      headers: {
+        'Authorization': `Bearer ${token}`,
+      },
+      body: JSON.stringify(data),
+    });
+  },
+
+  deleteAccessCode: async (id: string) => {
+    const token = localStorage.getItem('adminToken');
+    return apiCall(`/api/admin/access-codes/${id}`, {
+      method: 'DELETE',
+      headers: {
+        'Authorization': `Bearer ${token}`,
+      },
+    });
+  },
+};
+
+// Payment API calls
+export const paymentApi = {
+  createSubscriptionPayment: async () => {
+    return apiCall('/api/payments/square/create-subscription', {
+      method: 'POST',
+    });
+  },
+
+  processSubscriptionPayment: async (data: {
+    sourceId: string;
+    orderId: string;
+    invoiceId: string;
+    idempotencyKey?: string;
+  }) => {
+    return apiCall('/api/payments/square/process-subscription', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  },
+
+  getSubscriptionStatus: async () => {
+    return apiCall('/api/payments/subscription/status');
+  },
+
+  getSquareConfig: async () => {
+    return apiCall('/api/payments/square/config');
   },
 };
 

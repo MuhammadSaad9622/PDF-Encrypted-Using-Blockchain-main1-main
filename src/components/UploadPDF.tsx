@@ -1,6 +1,7 @@
-import { useState, useRef } from 'react';
-import { FileUp, Upload, CheckCircle2, Loader2, AlertCircle } from 'lucide-react';
-import { pdfApi } from '../utils/api';
+import { useState, useRef, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { FileUp, Upload, CheckCircle2, Loader2, AlertCircle, Lock } from 'lucide-react';
+import { pdfApi, paymentApi } from '../utils/api';
 import { cacheMetadata, fetchAndCacheMetadata } from '../utils/nftCache';
 
 interface ProgressStep {
@@ -10,6 +11,7 @@ interface ProgressStep {
 }
 
 const UploadPDF = () => {
+  const navigate = useNavigate();
   const [file, setFile] = useState<File | null>(null);
   const [recipientAddress, setRecipientAddress] = useState<string>('');
   const [loading, setLoading] = useState<boolean>(false);
@@ -17,6 +19,8 @@ const UploadPDF = () => {
   const [result, setResult] = useState<any>(null);
   const [currentStep, setCurrentStep] = useState<string>('');
   const [progressPercentage, setProgressPercentage] = useState<number>(0);
+  const [subscriptionStatus, setSubscriptionStatus] = useState<string>('loading');
+  const [subscriptionLoading, setSubscriptionLoading] = useState<boolean>(true);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const steps: ProgressStep[] = [
@@ -31,6 +35,34 @@ const UploadPDF = () => {
   ];
 
   const [progressSteps, setProgressSteps] = useState<ProgressStep[]>(steps);
+
+  // Fetch subscription status on component mount
+  useEffect(() => {
+    const fetchSubscriptionStatus = async () => {
+      try {
+        setSubscriptionLoading(true);
+        const response = await paymentApi.getSubscriptionStatus();
+        if (response?.success && response?.subscription) {
+          setSubscriptionStatus(response.subscription.status || 'inactive');
+        } else {
+          setSubscriptionStatus('inactive');
+        }
+      } catch (error: any) {
+        console.error('Error fetching subscription status:', error);
+        setSubscriptionStatus('inactive');
+      } finally {
+        setSubscriptionLoading(false);
+      }
+    };
+
+    fetchSubscriptionStatus();
+  }, []);
+
+  const handleLockClick = () => {
+    navigate('/dashboard/invoices');
+  };
+
+  const isSubscriptionActive = subscriptionStatus === 'active';
 
   const updateProgress = (stepName: string, percentage: number) => {
     setCurrentStep(stepName);
@@ -83,6 +115,9 @@ const UploadPDF = () => {
     setProgressSteps(steps.map(s => ({ ...s, status: 'pending' as const })));
     setProgressPercentage(0);
 
+    // Declare isActive outside try-catch so it's accessible in both blocks
+    let isActive = true;
+
     try {
       const formData = new FormData();
       formData.append('pdf', file);
@@ -107,7 +142,6 @@ const UploadPDF = () => {
       ];
 
       // Start progress simulation
-      let isActive = true;
       progressIntervals.forEach((interval) => {
         setTimeout(() => {
           if (isActive) {
@@ -150,7 +184,20 @@ const UploadPDF = () => {
       setLoading(false);
     } catch (err: any) {
       isActive = false;
-      setError(err.message || 'Error processing PDF');
+      
+      // Handle 403 errors (subscription required) with a more user-friendly message
+      let errorMessage = err.message || 'Error processing PDF';
+      if (err.status === 403 || err.requiresSubscription) {
+        if (err.message?.includes('expired')) {
+          errorMessage = 'Your subscription has expired. Please renew your subscription to continue uploading files.';
+        } else {
+          errorMessage = 'Active subscription required. Please subscribe to upload and mint PDF files.';
+        }
+      } else if (err.status === 401) {
+        errorMessage = 'Authentication required. Please sign in again.';
+      }
+      
+      setError(errorMessage);
       setLoading(false);
       setProgressSteps(prev => prev.map(step => 
         step.status === 'active' ? { ...step, status: 'error' as const } : step
@@ -194,28 +241,50 @@ const UploadPDF = () => {
             <label className="block text-gray-300 text-sm font-bold mb-2">
               Select PDF File
             </label>
-            <div
-              onDrop={handleDrop}
-              onDragOver={handleDragOver}
-              className="border-2 border-dashed border-gray-600 rounded-lg p-12 text-center hover:border-purple-500 transition-colors cursor-pointer bg-dark-card/50"
-              onClick={() => fileInputRef.current?.click()}
-            >
-              <input
-                ref={fileInputRef}
-                type="file"
-                accept=".pdf"
-                onChange={handleFileChange}
-                className="hidden"
-                id="pdf-upload"
-                disabled={loading}
-              />
-              <FileUp className="mx-auto text-gray-400 mb-4" size={48} />
-              <p className="text-sm text-gray-300 mb-2">
-                {file ? file.name : 'Drag & drop your PDF here or click to browse'}
-              </p>
-              <p className="text-xs text-gray-500">
-                {file ? `${(file.size / 1024 / 1024).toFixed(2)} MB` : 'PDF files only'}
-              </p>
+            <div className="relative">
+              <div
+                onDrop={isSubscriptionActive ? handleDrop : undefined}
+                onDragOver={isSubscriptionActive ? handleDragOver : undefined}
+                className={`border-2 border-dashed border-gray-600 rounded-lg p-12 text-center transition-colors bg-dark-card/50 ${
+                  isSubscriptionActive 
+                    ? 'hover:border-purple-500 cursor-pointer' 
+                    : 'cursor-not-allowed opacity-60'
+                }`}
+                onClick={isSubscriptionActive ? () => fileInputRef.current?.click() : undefined}
+              >
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept=".pdf"
+                  onChange={handleFileChange}
+                  className="hidden"
+                  id="pdf-upload"
+                  disabled={loading || !isSubscriptionActive}
+                />
+                <FileUp className="mx-auto text-gray-400 mb-4" size={48} />
+                <p className="text-sm text-gray-300 mb-2">
+                  {file ? file.name : 'Drag & drop your PDF here or click to browse'}
+                </p>
+                <p className="text-xs text-gray-500">
+                  {file ? `${(file.size / 1024 / 1024).toFixed(2)} MB` : 'PDF files only'}
+                </p>
+              </div>
+              
+              {/* Lock Overlay */}
+              {!subscriptionLoading && !isSubscriptionActive && (
+                <div 
+                  className="absolute inset-0 bg-black/70 rounded-lg flex flex-col items-center justify-center cursor-pointer hover:bg-black/80 transition-colors z-10"
+                  onClick={handleLockClick}
+                >
+                  <Lock className="text-yellow-400 mb-3" size={48} />
+                  <p className="text-white font-semibold text-lg mb-1">
+                    Subscription Required
+                  </p>
+                  <p className="text-gray-300 text-sm">
+                    Click to view subscription plans
+                  </p>
+                </div>
+              )}
             </div>
           </div>
 
@@ -286,7 +355,7 @@ const UploadPDF = () => {
           {/* Submit Button */}
           <button
             type="submit"
-            disabled={loading || !file}
+            disabled={loading || !file || !isSubscriptionActive}
             className="btn-primary w-full py-3 disabled:opacity-50 disabled:cursor-not-allowed"
           >
             {loading ? (
