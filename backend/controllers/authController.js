@@ -1,5 +1,5 @@
-import User from '../models/User.js';
-import AccessCode from '../models/AccessCode.js';
+import { userService } from '../services/userService.js';
+import { accessCodeService } from '../services/accessCodeService.js';
 import jwt from 'jsonwebtoken';
 import { ethers } from 'ethers';
 import { contractAddress } from '../utils/wallet.js';
@@ -51,13 +51,13 @@ export const signup = async (req, res) => {
     }
 
     const normalizedAccessCode = accessCode.toUpperCase().trim();
-    const accessCodeDoc = await AccessCode.findOne({ code: normalizedAccessCode });
+    const accessCodeDoc = await accessCodeService.findByCode(normalizedAccessCode);
 
     if (!accessCodeDoc) {
       return res.status(400).json({ error: 'Invalid access code' });
     }
 
-    const accessCodeValidation = accessCodeDoc.isValid();
+    const accessCodeValidation = accessCodeService.isValid(accessCodeDoc);
     if (!accessCodeValidation.valid) {
       return res.status(400).json({ error: accessCodeValidation.reason });
     }
@@ -76,7 +76,7 @@ export const signup = async (req, res) => {
     const normalizedEmail = email.toLowerCase().trim();
 
     // Check if user already exists (use normalized email)
-    const existingUser = await User.findOne({ email: normalizedEmail });
+    const existingUser = await userService.findByEmail(normalizedEmail);
     if (existingUser) {
       return res.status(400).json({ error: 'User with this email already exists' });
     }
@@ -85,7 +85,7 @@ export const signup = async (req, res) => {
     let referredBy = null;
     if (referralCode) {
       const normalizedReferralCode = referralCode.toUpperCase().trim();
-      const referrer = await User.findOne({ referralCode: normalizedReferralCode });
+      const referrer = await userService.findByReferralCode(normalizedReferralCode);
       
       if (!referrer) {
         return res.status(400).json({ error: 'Invalid referral code' });
@@ -96,7 +96,7 @@ export const signup = async (req, res) => {
         return res.status(400).json({ error: 'Cannot refer yourself' });
       }
       
-      referredBy = referrer._id;
+      referredBy = referrer.id;
     }
 
     // Generate unique referral code for new user
@@ -104,7 +104,7 @@ export const signup = async (req, res) => {
     let isUnique = false;
     while (!isUnique) {
       userReferralCode = Math.random().toString(36).substring(2, 10).toUpperCase();
-      const existing = await User.findOne({ referralCode: userReferralCode });
+      const existing = await userService.findByReferralCode(userReferralCode);
       if (!existing) {
         isUnique = true;
       }
@@ -139,7 +139,7 @@ export const signup = async (req, res) => {
       }
     }
     
-    const user = new User({
+    const user = await userService.create({
       email: normalizedEmail,
       password,
       name: name.trim(),
@@ -168,19 +168,17 @@ export const signup = async (req, res) => {
       subscriptionEndDate: subscriptionEndDate
     });
 
-    await user.save();
-
     // Increment access code usage
-    await accessCodeDoc.incrementUsage();
+    await accessCodeService.incrementUsage(accessCodeDoc.id);
 
-    // Generate token (convert _id to string)
-    const token = generateToken(user._id.toString(), user.role);
+    // Generate token
+    const token = generateToken(user.id, user.role);
 
     res.status(201).json({
       success: true,
       token,
       user: {
-        id: user._id.toString(),
+        id: user.id,
         email: user.email,
         name: user.name,
         walletAddress: user.walletAddress,
@@ -193,23 +191,16 @@ export const signup = async (req, res) => {
     console.error('Signup error:', error);
     console.error('Error stack:', error.stack);
     
-    // Handle MongoDB duplicate key error (unique index violation)
-    if (error.code === 11000 || error.code === 11001) {
-      const field = error.keyPattern ? Object.keys(error.keyPattern)[0] : 'email';
-      // Map username to email for better error message
-      const fieldName = field === 'username' ? 'email' : field;
-      return res.status(400).json({ error: `User with this ${fieldName} already exists` });
+    // Handle duplicate key error (unique constraint violation)
+    if (error.code === 11000 || error.code === 11001 || error.code === '23505') {
+      const field = error.message?.includes('email') ? 'email' : 'referral_code';
+      return res.status(400).json({ error: `User with this ${field} already exists` });
     }
     
-    // Handle MongoDB connection errors
-    if (error.name === 'MongoServerError' || error.name === 'MongoNetworkError') {
-      console.error('MongoDB connection error during signup:', error.message);
+    // Handle database connection errors
+    if (error.message?.includes('Supabase is not configured') || error.message?.includes('Database connection')) {
+      console.error('Database connection error during signup:', error.message);
       return res.status(503).json({ error: 'Database connection error. Please try again.' });
-    }
-    
-    // Handle validation errors
-    if (error.name === 'ValidationError') {
-      return res.status(400).json({ error: Object.values(error.errors).map(e => e.message).join(', ') });
     }
     
 
@@ -234,7 +225,7 @@ export const signin = async (req, res) => {
     const normalizedEmail = email.toLowerCase().trim();
 
     // Find user (use normalized email)
-    const user = await User.findOne({ email: normalizedEmail });
+    const user = await userService.findByEmail(normalizedEmail);
     if (!user) {
       return res.status(401).json({ error: 'Invalid email or password' });
     }
@@ -254,14 +245,14 @@ export const signin = async (req, res) => {
     }
 
     // Check password
-    const isPasswordValid = await user.comparePassword(password);
+    const isPasswordValid = await userService.comparePassword(password, user.password);
     if (!isPasswordValid) {
       return res.status(401).json({ error: 'Invalid email or password' });
     }
 
-    // Generate token (convert _id to string)
+    // Generate token
     // Include role in token for admin users
-    const tokenPayload = { userId: user._id.toString() };
+    const tokenPayload = { userId: user.id };
     if (user.role === 'admin') {
       tokenPayload.role = 'admin';
     }
@@ -271,7 +262,7 @@ export const signin = async (req, res) => {
       success: true,
       token,
       user: {
-        id: user._id.toString(),
+        id: user.id,
         email: user.email,
         name: user.name,
         walletAddress: user.walletAddress,
@@ -287,15 +278,18 @@ export const signin = async (req, res) => {
 // Get current user
 export const getCurrentUser = async (req, res) => {
   try {
-    const user = await User.findById(req.userId).select('-password');
+    const user = await userService.findById(req.userId);
     if (!user) {
       return res.status(404).json({ error: 'User not found' });
     }
 
+    // Remove password from response
+    const { password, ...userWithoutPassword } = user;
+
     res.status(200).json({
       success: true,
       user: {
-        id: user._id.toString(),
+        id: user.id,
         email: user.email,
         name: user.name,
         walletAddress: user.walletAddress,
@@ -329,19 +323,16 @@ export const getUserInvoices = async (req, res) => {
     const limit = parseInt(req.query.limit) || 20;
     const skip = (page - 1) * limit;
 
-    const user = await User.findById(userId).select('email name');
+    const user = await userService.findById(userId);
     if (!user) {
       return res.status(404).json({ error: 'User not found' });
     }
 
-    // Get invoices from database for this user
-    const Invoice = (await import('../models/Invoice.js')).default;
-    const mongoose = (await import('mongoose')).default;
-    const userIdObjectId = new mongoose.Types.ObjectId(userId);
+    // Get invoices from database for this user (using Supabase)
+    const { invoiceService } = await import('../services/invoiceService.js');
     
     // Get all invoices for this user
-    const invoices = await Invoice.find({ userId: userIdObjectId })
-      .sort({ createdAt: -1 });
+    const invoices = await invoiceService.findByUserId(userId);
 
     // Apply pagination
     const paginatedInvoices = invoices.slice(skip, skip + limit);
@@ -353,7 +344,7 @@ export const getUserInvoices = async (req, res) => {
     const formattedInvoices = paginatedInvoices.map((invoice) => ({
       id: invoice.invoiceId,
       subscriptionPlan: invoice.subscriptionPlan,
-      amount: invoice.amount.toFixed(2),
+      amount: typeof invoice.amount === 'number' ? invoice.amount.toFixed(2) : parseFloat(invoice.amount).toFixed(2),
       currency: invoice.currency,
       status: invoice.status,
       type: `Subscription - ${invoice.subscriptionPlan}`,
@@ -394,19 +385,18 @@ export const updateWalletAddress = async (req, res) => {
       return res.status(400).json({ error: 'Wallet address is required' });
     }
 
-    const user = await User.findById(req.userId);
+    const user = await userService.update(req.userId, {
+      walletAddress: walletAddress
+    });
+
     if (!user) {
       return res.status(404).json({ error: 'User not found' });
     }
 
-    user.walletAddress = walletAddress;
-    user.updatedAt = Date.now();
-    await user.save();
-
     res.status(200).json({
       success: true,
       user: {
-        id: user._id.toString(),
+        id: user.id,
         email: user.email,
         name: user.name,
         walletAddress: user.walletAddress,
@@ -434,41 +424,40 @@ export const updateProfile = async (req, res) => {
   try {
     const { name, email, profilePhoto, bio, phone, location, address, city, country, zipCode, website, company, jobTitle } = req.body;
 
-    const user = await User.findById(req.userId);
+    // Check if email is being updated and if it's already taken
+    if (email !== undefined) {
+      const normalizedEmail = email.toLowerCase().trim();
+      const existingUser = await userService.findByEmail(normalizedEmail);
+      if (existingUser && existingUser.id !== req.userId) {
+        return res.status(400).json({ error: 'Email is already taken' });
+      }
+    }
+
+    // Build update object
+    const updateData = {};
+    if (name !== undefined) updateData.name = name;
+    if (email !== undefined) updateData.email = email.toLowerCase().trim();
+    if (profilePhoto !== undefined) updateData.profilePhoto = profilePhoto;
+    if (bio !== undefined) updateData.bio = bio;
+    if (phone !== undefined) updateData.phone = phone;
+    if (location !== undefined) updateData.location = location;
+    if (address !== undefined) updateData.address = address;
+    if (city !== undefined) updateData.city = city;
+    if (country !== undefined) updateData.country = country;
+    if (zipCode !== undefined) updateData.zipCode = zipCode;
+    if (website !== undefined) updateData.website = website;
+    if (company !== undefined) updateData.company = company;
+    if (jobTitle !== undefined) updateData.jobTitle = jobTitle;
+
+    const user = await userService.update(req.userId, updateData);
     if (!user) {
       return res.status(404).json({ error: 'User not found' });
     }
 
-    // Update fields if provided
-    if (name !== undefined) user.name = name;
-    if (email !== undefined) {
-      const normalizedEmail = email.toLowerCase().trim();
-      // Check if email is already taken by another user
-      const existingUser = await User.findOne({ email: normalizedEmail, _id: { $ne: req.userId } });
-      if (existingUser) {
-        return res.status(400).json({ error: 'Email is already taken' });
-      }
-      user.email = normalizedEmail;
-    }
-    if (profilePhoto !== undefined) user.profilePhoto = profilePhoto;
-    if (bio !== undefined) user.bio = bio;
-    if (phone !== undefined) user.phone = phone;
-    if (location !== undefined) user.location = location;
-    if (address !== undefined) user.address = address;
-    if (city !== undefined) user.city = city;
-    if (country !== undefined) user.country = country;
-    if (zipCode !== undefined) user.zipCode = zipCode;
-    if (website !== undefined) user.website = website;
-    if (company !== undefined) user.company = company;
-    if (jobTitle !== undefined) user.jobTitle = jobTitle;
-    
-    user.updatedAt = Date.now();
-    await user.save();
-
     res.status(200).json({
       success: true,
       user: {
-        id: user._id.toString(),
+        id: user.id,
         email: user.email,
         name: user.name,
         walletAddress: user.walletAddress,
@@ -498,7 +487,7 @@ export const getUserNotes = async (req, res) => {
   try {
     const userId = req.userId;
     
-    const user = await User.findById(userId);
+    const user = await userService.findById(userId);
     if (!user) {
       return res.status(404).json({ error: 'User not found' });
     }
@@ -527,14 +516,12 @@ export const markNotesAsRead = async (req, res) => {
   try {
     const userId = req.userId;
     
-    const user = await User.findById(userId);
+    const user = await userService.update(userId, {
+      adminNotesLastReadAt: new Date()
+    });
     if (!user) {
       return res.status(404).json({ error: 'User not found' });
     }
-
-    // Update last read timestamp
-    user.adminNotesLastReadAt = new Date();
-    await user.save();
 
     res.status(200).json({
       success: true,

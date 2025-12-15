@@ -1,5 +1,5 @@
 import jwt from 'jsonwebtoken';
-import User from '../models/User.js';
+import { userService } from '../services/userService.js';
 
 const JWT_SECRET = process.env.JWT_SECRET || 'your-secret-key-change-in-production';
 
@@ -15,7 +15,7 @@ export const adminAuth = async (req, res, next) => {
     req.userId = decoded.userId;
 
     // Verify user is admin
-    const user = await User.findById(decoded.userId);
+    const user = await userService.findById(decoded.userId);
     if (!user) {
       return res.status(401).json({ error: 'User not found' });
     }

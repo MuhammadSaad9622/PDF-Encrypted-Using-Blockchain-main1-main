@@ -1,4 +1,4 @@
-import User from '../models/User.js';
+import { userService } from '../services/userService.js';
 import jwt from 'jsonwebtoken';
 import { ethers } from 'ethers';
 import { contractAddress } from '../utils/wallet.js';
@@ -15,7 +15,7 @@ export const adminLogin = async (req, res) => {
     }
 
     const normalizedEmail = email.toLowerCase().trim();
-    const user = await User.findOne({ email: normalizedEmail });
+    const user = await userService.findByEmail(normalizedEmail);
 
     if (!user) {
       return res.status(401).json({ error: 'Invalid credentials' });
@@ -27,14 +27,14 @@ export const adminLogin = async (req, res) => {
     }
 
     // Check password
-    const isPasswordValid = await user.comparePassword(password);
+    const isPasswordValid = await userService.comparePassword(password, user.password);
     if (!isPasswordValid) {
       return res.status(401).json({ error: 'Invalid credentials' });
     }
 
     // Generate admin token
     const token = jwt.sign(
-      { userId: user._id.toString(), role: 'admin' },
+      { userId: user.id, role: 'admin' },
       JWT_SECRET,
       { expiresIn: '24h' }
     );
@@ -43,7 +43,7 @@ export const adminLogin = async (req, res) => {
       success: true,
       token,
       user: {
-        id: user._id.toString(),
+        id: user.id,
         email: user.email,
         name: user.name,
         role: user.role
@@ -75,25 +75,28 @@ export const getAllUsers = async (req, res) => {
       : {};
 
     // Get users with pagination
-    const users = await User.find(searchQuery)
-      .select('-password')
-      .sort({ createdAt: -1 })
-      .skip(skip)
-      .limit(limit);
+    const users = await userService.find(searchQuery, {
+      sort: { createdAt: -1 },
+      skip,
+      limit
+    });
 
     // Get total count
-    const total = await User.countDocuments(searchQuery);
+    const total = await userService.count(searchQuery);
 
-    // Map users to ensure id is always a string
-    const mappedUsers = users.map(user => ({
-      id: user._id.toString(),
-      email: user.email,
-      name: user.name || '',
-      walletAddress: user.walletAddress || null,
-      createdAt: user.createdAt,
-      updatedAt: user.updatedAt,
-      role: user.role || 'user'
-    }));
+    // Map users to ensure id is always a string (remove password)
+    const mappedUsers = users.map(user => {
+      const { password, ...userWithoutPassword } = user;
+      return {
+        id: user.id,
+        email: user.email,
+        name: user.name || null, // Return null instead of empty string
+        walletAddress: user.walletAddress || null,
+        createdAt: user.createdAt,
+        updatedAt: user.updatedAt,
+        role: user.role || 'user'
+      };
+    });
 
     res.status(200).json({
       success: true,
@@ -115,55 +118,55 @@ export const getAllUsers = async (req, res) => {
 export const getUserById = async (req, res) => {
   try {
     const { userId } = req.params;
-    const user = await User.findById(userId)
-      .select('-password')
-      .populate('referredBy', 'name email referralCode');
+    const user = await userService.findById(userId);
 
     if (!user) {
       return res.status(404).json({ error: 'User not found' });
     }
 
     // Get users referred by this user
-    const referredUsers = await User.find({ referredBy: userId })
-      .select('name email createdAt')
-      .limit(10)
-      .sort({ createdAt: -1 });
+    const referredUsers = await userService.findByReferredBy(userId);
+    const limitedReferredUsers = referredUsers.slice(0, 10);
 
-    const userObj = user.toObject();
+    // Get referredBy user if exists
+    let referredByUser = null;
+    if (user.referredBy) {
+      referredByUser = await userService.findById(user.referredBy);
+    }
     
     res.status(200).json({
       success: true,
       user: {
-        id: userObj._id.toString(),
-        email: userObj.email,
-        name: userObj.name,
-        walletAddress: userObj.walletAddress || null,
-        createdAt: userObj.createdAt,
-        accessCode: userObj.accessCode || null,
-        referralCode: userObj.referralCode || null,
-        referredBy: userObj.referredBy ? {
-          id: userObj.referredBy._id?.toString() || userObj.referredBy.id,
-          name: userObj.referredBy.name || '',
-          email: userObj.referredBy.email || '',
-          referralCode: userObj.referredBy.referralCode || ''
+        id: user.id,
+        email: user.email,
+        name: user.name,
+        walletAddress: user.walletAddress || null,
+        createdAt: user.createdAt,
+        accessCode: user.accessCode || null,
+        referralCode: user.referralCode || null,
+        referredBy: referredByUser ? {
+          id: referredByUser.id,
+          name: referredByUser.name || '',
+          email: referredByUser.email || '',
+          referralCode: referredByUser.referralCode || ''
         } : null,
-        referredUsers: referredUsers.map(u => ({
-          id: u._id.toString(),
+        referredUsers: limitedReferredUsers.map(u => ({
+          id: u.id,
           name: u.name || '',
           email: u.email || '',
           createdAt: u.createdAt
         })),
-        subscriptionPlan: userObj.subscriptionPlan || null,
-        subscriptionStatus: userObj.subscriptionStatus || 'inactive',
-        subscriptionStartDate: userObj.subscriptionStartDate || null,
-        subscriptionEndDate: userObj.subscriptionEndDate || null,
-        isSuspended: userObj.isSuspended || false,
-        suspendedAt: userObj.suspendedAt || null,
-        suspendedReason: userObj.suspendedReason || '',
-        adminNotes: userObj.adminNotes || '',
-        profileComplete: userObj.profileComplete || false,
-        totalFileSizeUsed: userObj.totalFileSizeUsed || 0,
-        fileSizeLimit: userObj.fileSizeLimit || (250 * 1024 * 1024)
+        subscriptionPlan: user.subscriptionPlan || null,
+        subscriptionStatus: user.subscriptionStatus || 'inactive',
+        subscriptionStartDate: user.subscriptionStartDate || null,
+        subscriptionEndDate: user.subscriptionEndDate || null,
+        isSuspended: user.isSuspended || false,
+        suspendedAt: user.suspendedAt || null,
+        suspendedReason: user.suspendedReason || '',
+        adminNotes: user.adminNotes || '',
+        profileComplete: user.profileComplete || false,
+        totalFileSizeUsed: user.totalFileSizeUsed || 0,
+        fileSizeLimit: user.fileSizeLimit || (250 * 1024 * 1024)
       }
     });
   } catch (error) {
@@ -176,20 +179,17 @@ export const getUserById = async (req, res) => {
 export const getUserNFTDetails = async (req, res) => {
   try {
     const { userId } = req.params;
-    const user = await User.findById(userId).select('-password');
+    const user = await userService.findById(userId);
 
     if (!user) {
       return res.status(404).json({ error: 'User not found' });
     }
 
-    // Import NFT model
-    const NFT = (await import('../models/NFT.js')).default;
-    const mongoose = (await import('mongoose')).default;
+    // Import NFT service (now using Supabase)
+    const { nftService } = await import('../services/nftService.js');
 
-    // Query NFTs from database by userId (primary method)
-    const userIdObjectId = new mongoose.Types.ObjectId(userId);
-    const dbNFTs = await NFT.find({ userId: userIdObjectId })
-      .sort({ createdAt: -1 });
+    // Query NFTs from database by userId (now using UUID)
+    const dbNFTs = await nftService.findByUserId(userId);
 
     let nftCount = dbNFTs.length;
     let nfts = [];
@@ -206,7 +206,7 @@ export const getUserNFTDetails = async (req, res) => {
       }));
 
       pdfReports = dbNFTs.map(nft => ({
-        id: nft._id.toString(),
+        id: nft.id,
         tokenId: nft.tokenId,
         name: nft.originalName || `PDF Document #${nft.tokenId}`,
         mintedAt: nft.createdAt,
@@ -274,7 +274,7 @@ export const getUserNFTDetails = async (req, res) => {
     res.status(200).json({
       success: true,
       user: {
-        id: user._id.toString(),
+        id: user.id,
         email: user.email,
         name: user.name,
         walletAddress: user.walletAddress || null,
@@ -309,73 +309,89 @@ export const getBillingInvoices = async (req, res) => {
     const limit = parseInt(req.query.limit) || 20;
     const skip = (page - 1) * limit;
 
-    // Get all users with wallets
-    const users = await User.find({ walletAddress: { $ne: null } })
-      .select('email name walletAddress createdAt')
-      .sort({ createdAt: -1 });
+    // Import invoice service
+    const { invoiceService } = await import('../services/invoiceService.js');
 
-    const provider = new ethers.JsonRpcProvider(
-      process.env.POLYGON_MAINNET_RPC_URL || 'https://polygon-rpc.com'
+    // Fetch all invoices from Supabase with pagination
+    const invoices = await invoiceService.find({}, {
+      sort: { createdAt: -1 },
+      skip,
+      limit
+    });
+
+    // Get total count for pagination
+    const total = await invoiceService.count({});
+
+    // Fetch user information for each invoice
+    const invoicesWithUserInfo = await Promise.all(
+      invoices.map(async (invoice) => {
+        const user = await userService.findById(invoice.userId);
+        if (!user) {
+          // If user not found, return invoice with minimal info
+          return {
+            id: invoice.id,
+            invoiceId: invoice.invoiceId,
+            userId: invoice.userId,
+            userEmail: 'Unknown',
+            userName: 'Unknown User',
+            walletAddress: null,
+            tokenId: invoice.subscriptionPlan || 'N/A', // Use subscription plan as identifier
+            amount: typeof invoice.amount === 'number' ? invoice.amount.toFixed(2) : parseFloat(invoice.amount || 0).toFixed(2),
+            currency: invoice.currency || 'USD',
+            status: invoice.status || 'Pending',
+            type: invoice.subscriptionPlan ? `Subscription - ${invoice.subscriptionPlan}` : 'Invoice',
+            createdAt: invoice.createdAt,
+            transactionHash: invoice.transactionHash || 'N/A'
+          };
+        }
+
+        // Helper function to get display name (same as frontend)
+        const getDisplayName = (user) => {
+          const userName = user.name?.trim();
+          if (userName && userName !== '') {
+            return userName;
+          }
+          if (user.email) {
+            const emailPart = user.email.split('@')[0];
+            return emailPart
+              .replace(/[._-]/g, ' ')
+              .split(' ')
+              .map(word => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
+              .join(' ');
+          }
+          return 'User';
+        };
+
+        return {
+          id: invoice.id,
+          invoiceId: invoice.invoiceId,
+          userId: invoice.userId,
+          userEmail: user.email,
+          userName: getDisplayName(user),
+          walletAddress: user.walletAddress || null,
+          tokenId: invoice.subscriptionPlan || 'N/A', // Use subscription plan as identifier
+          amount: typeof invoice.amount === 'number' ? invoice.amount.toFixed(2) : parseFloat(invoice.amount || 0).toFixed(2),
+          currency: invoice.currency || 'USD',
+          status: invoice.status || 'Pending',
+          type: invoice.subscriptionPlan ? `Subscription - ${invoice.subscriptionPlan}` : 'Invoice',
+          createdAt: invoice.createdAt,
+          transactionHash: invoice.transactionHash || 'N/A'
+        };
+      })
     );
 
-    // Generate invoices based on NFT mints
-    const invoices = [];
-    
-    for (const user of users) {
-      if (contractAddress) {
-        try {
-          const contract = new ethers.Contract(
-            contractAddress,
-            [
-              'function balanceOf(address owner) view returns (uint256)',
-              'function tokenOfOwnerByIndex(address owner, uint256 index) view returns (uint256)'
-            ],
-            provider
-          );
-
-          const balance = await contract.balanceOf(user.walletAddress);
-          const nftCount = Number(balance);
-
-          if (nftCount > 0) {
-            // Create invoice for each NFT (in production, track actual transactions)
-            for (let i = 0; i < nftCount; i++) {
-              try {
-                const tokenId = await contract.tokenOfOwnerByIndex(user.walletAddress, i);
-                invoices.push({
-                  id: `INV-${tokenId.toString()}-${user._id.toString()}`,
-                  userId: user._id.toString(),
-                  userEmail: user.email,
-                  userName: user.name || 'N/A',
-                  walletAddress: user.walletAddress,
-                  tokenId: tokenId.toString(),
-                  amount: '0.01', // Mock amount - in production, track actual costs
-                  currency: 'MATIC',
-                  status: 'Paid',
-                  type: 'NFT Mint',
-                  createdAt: user.createdAt,
-                  transactionHash: 'N/A' // Would track actual tx hash
-                });
-              } catch (error) {
-                console.error(`Error processing invoice for token ${i}:`, error.message);
-              }
-            }
-          }
-        } catch (error) {
-          console.warn(`Could not fetch invoices for user ${user.email}:`, error.message);
-        }
-      }
-    }
-
-    // Sort by creation date (newest first)
-    invoices.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
-
-    // Apply pagination
-    const paginatedInvoices = invoices.slice(skip, skip + limit);
-    const total = invoices.length;
+    // Calculate summary statistics
+    const allInvoices = await invoiceService.find({}); // Get all for summary
+    const totalAmount = allInvoices.reduce((sum, inv) => {
+      const amount = typeof inv.amount === 'number' ? inv.amount : parseFloat(inv.amount || 0);
+      return sum + amount;
+    }, 0);
+    const paidInvoices = allInvoices.filter(inv => inv.status === 'Paid' || inv.status === 'paid').length;
+    const pendingInvoices = allInvoices.filter(inv => inv.status === 'Pending' || inv.status === 'pending').length;
 
     res.status(200).json({
       success: true,
-      invoices: paginatedInvoices,
+      invoices: invoicesWithUserInfo,
       pagination: {
         page,
         limit,
@@ -384,9 +400,9 @@ export const getBillingInvoices = async (req, res) => {
       },
       summary: {
         totalInvoices: total,
-        totalAmount: (total * 0.01).toFixed(2), // Mock calculation
-        paidInvoices: total,
-        pendingInvoices: 0
+        totalAmount: totalAmount.toFixed(2),
+        paidInvoices,
+        pendingInvoices
       }
     });
   } catch (error) {
@@ -405,19 +421,18 @@ export const updateUser = async (req, res) => {
     delete updateData.password;
     delete updateData.role;
 
-    const user = await User.findByIdAndUpdate(
-      userId,
-      { ...updateData, updatedAt: Date.now() },
-      { new: true, runValidators: true }
-    ).select('-password');
+    const user = await userService.update(userId, updateData);
 
     if (!user) {
       return res.status(404).json({ error: 'User not found' });
     }
 
+    // Remove password from response
+    const { password, ...userWithoutPassword } = user;
+
     res.status(200).json({
       success: true,
-      user
+      user: userWithoutPassword
     });
   } catch (error) {
     console.error('Error updating user:', error);
@@ -430,18 +445,104 @@ export const deleteUser = async (req, res) => {
   try {
     const { userId } = req.params;
 
-    const user = await User.findByIdAndDelete(userId);
-
+    const user = await userService.findById(userId);
     if (!user) {
       return res.status(404).json({ error: 'User not found' });
     }
 
+    // Prevent deleting admin users
+    if (user.role === 'admin') {
+      return res.status(403).json({ error: 'Cannot delete admin users' });
+    }
+
+    // Import services for related data
+    const { invoiceService } = await import('../services/invoiceService.js');
+    const { nftService } = await import('../services/nftService.js');
+    const { accessCodeService } = await import('../services/accessCodeService.js');
+    const supabase = (await import('../utils/supabase.js')).default;
+
+    if (!supabase) {
+      return res.status(500).json({ error: 'Supabase is not configured' });
+    }
+
+    // Delete or handle related records before deleting user
+    
+    // 1. Delete user's invoices
+    try {
+      const userInvoices = await invoiceService.findByUserId(userId);
+      if (userInvoices && userInvoices.length > 0) {
+        for (const invoice of userInvoices) {
+          await supabase.from('invoices').delete().eq('id', invoice.id);
+        }
+        console.log(`Deleted ${userInvoices.length} invoices for user ${userId}`);
+      }
+    } catch (invoiceError) {
+      console.warn('Error deleting invoices:', invoiceError.message);
+      // Continue with deletion even if invoices fail
+    }
+
+    // 2. Delete user's NFTs (or set user_id to null if you want to keep NFTs)
+    try {
+      const userNFTs = await nftService.findByUserId(userId);
+      if (userNFTs && userNFTs.length > 0) {
+        for (const nft of userNFTs) {
+          // Option 1: Delete NFTs
+          await supabase.from('nfts').delete().eq('id', nft.id);
+          // Option 2: Keep NFTs but remove user link (uncomment if preferred)
+          // await nftService.update(nft.id, { user_id: null });
+        }
+        console.log(`Deleted ${userNFTs.length} NFTs for user ${userId}`);
+      }
+    } catch (nftError) {
+      console.warn('Error deleting NFTs:', nftError.message);
+      // Continue with deletion even if NFTs fail
+    }
+
+    // 3. Delete access codes created by this user
+    try {
+      const userAccessCodes = await accessCodeService.find({ createdBy: userId });
+      if (userAccessCodes && userAccessCodes.length > 0) {
+        for (const code of userAccessCodes) {
+          await accessCodeService.delete(code.id);
+        }
+        console.log(`Deleted ${userAccessCodes.length} access codes created by user ${userId}`);
+      }
+    } catch (accessCodeError) {
+      console.warn('Error deleting access codes:', accessCodeError.message);
+      // Continue with deletion even if access codes fail
+    }
+
+    // 4. Update users that were referred by this user (set referred_by to null)
+    try {
+      const referredUsers = await userService.findByReferredBy(userId);
+      if (referredUsers && referredUsers.length > 0) {
+        for (const referredUser of referredUsers) {
+          await userService.update(referredUser.id, { referredBy: null });
+        }
+        console.log(`Updated ${referredUsers.length} users that were referred by user ${userId}`);
+      }
+    } catch (referralError) {
+      console.warn('Error updating referral relationships:', referralError.message);
+      // Continue with deletion even if referral updates fail
+    }
+
+    // 5. Now delete the user
+    await userService.delete(userId);
+
     res.status(200).json({
       success: true,
-      message: 'User deleted successfully'
+      message: 'User and all related data deleted successfully'
     });
   } catch (error) {
     console.error('Error deleting user:', error);
+    
+    // Provide helpful error message for foreign key violations
+    if (error.code === '23503') {
+      return res.status(400).json({ 
+        error: 'Cannot delete user: User still has related records. Please contact support if this error persists.' 
+      });
+    }
+    
     res.status(500).json({ error: error.message || 'Error deleting user' });
   }
 };
@@ -452,7 +553,7 @@ export const suspendUser = async (req, res) => {
     const { userId } = req.params;
     const { reason } = req.body;
 
-    const user = await User.findById(userId);
+    const user = await userService.findById(userId);
     if (!user) {
       return res.status(404).json({ error: 'User not found' });
     }
@@ -461,22 +562,22 @@ export const suspendUser = async (req, res) => {
       return res.status(403).json({ error: 'Cannot suspend admin users' });
     }
 
-    user.isSuspended = true;
-    user.suspendedAt = new Date();
-    user.suspendedReason = reason || '';
-    user.updatedAt = Date.now();
-    await user.save();
+    const updatedUser = await userService.update(userId, {
+      isSuspended: true,
+      suspendedAt: new Date(),
+      suspendedReason: reason || ''
+    });
 
     res.status(200).json({
       success: true,
       message: 'User suspended successfully',
       user: {
-        id: user._id.toString(),
-        email: user.email,
-        name: user.name,
-        isSuspended: user.isSuspended,
-        suspendedAt: user.suspendedAt,
-        suspendedReason: user.suspendedReason
+        id: updatedUser.id,
+        email: updatedUser.email,
+        name: updatedUser.name,
+        isSuspended: updatedUser.isSuspended,
+        suspendedAt: updatedUser.suspendedAt,
+        suspendedReason: updatedUser.suspendedReason
       }
     });
   } catch (error) {
@@ -490,22 +591,21 @@ export const unsuspendUser = async (req, res) => {
   try {
     const { userId } = req.params;
 
-    const user = await User.findById(userId);
+    const user = await userService.update(userId, {
+      isSuspended: false,
+      suspendedAt: null,
+      suspendedReason: ''
+    });
+
     if (!user) {
       return res.status(404).json({ error: 'User not found' });
     }
-
-    user.isSuspended = false;
-    user.suspendedAt = null;
-    user.suspendedReason = '';
-    user.updatedAt = Date.now();
-    await user.save();
 
     res.status(200).json({
       success: true,
       message: 'User unsuspended successfully',
       user: {
-        id: user._id.toString(),
+        id: user.id,
         email: user.email,
         name: user.name,
         isSuspended: user.isSuspended
@@ -523,25 +623,27 @@ export const updateUserNotes = async (req, res) => {
     const { userId } = req.params;
     const { adminNotes } = req.body;
 
-    const user = await User.findById(userId);
-    if (!user) {
+    const existingUser = await userService.findById(userId);
+    if (!existingUser) {
       return res.status(404).json({ error: 'User not found' });
     }
 
     // Only update adminNotesUpdatedAt if notes actually changed
-    const notesChanged = user.adminNotes !== (adminNotes || '');
-    user.adminNotes = adminNotes || '';
-    user.updatedAt = Date.now();
+    const notesChanged = existingUser.adminNotes !== (adminNotes || '');
+    const updateData = {
+      adminNotes: adminNotes || ''
+    };
     if (notesChanged) {
-      user.adminNotesUpdatedAt = new Date();
+      updateData.adminNotesUpdatedAt = new Date();
     }
-    await user.save();
+
+    const user = await userService.update(userId, updateData);
 
     res.status(200).json({
       success: true,
       message: 'User notes updated successfully',
       user: {
-        id: user._id.toString(),
+        id: user.id,
         email: user.email,
         name: user.name,
         adminNotes: user.adminNotes,
@@ -562,44 +664,42 @@ export const getAnalytics = async (req, res) => {
     );
 
     // Get total users
-    const totalUsers = await User.countDocuments();
+    const totalUsers = await userService.count();
     
-    // Get users with wallets
-    const usersWithWallets = await User.countDocuments({ walletAddress: { $ne: null } });
+    // Get users with wallets (filter after fetching since Supabase doesn't support $ne)
+    const allUsers = await userService.find({});
+    const usersWithWallets = allUsers.filter(u => u.walletAddress !== null && u.walletAddress !== '').length;
     
     // Get users created in last 7 days
     const sevenDaysAgo = new Date();
     sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
-    const newUsersLast7Days = await User.countDocuments({ createdAt: { $gte: sevenDaysAgo } });
+    const allUsers7Days = await userService.find({});
+    const newUsersLast7Days = allUsers7Days.filter(u => new Date(u.createdAt) >= sevenDaysAgo).length;
     
     // Get users created in last 30 days
     const thirtyDaysAgo = new Date();
     thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
-    const newUsersLast30Days = await User.countDocuments({ createdAt: { $gte: thirtyDaysAgo } });
+    const allUsers30Days = await userService.find({});
+    const newUsersLast30Days = allUsers30Days.filter(u => new Date(u.createdAt) >= thirtyDaysAgo).length;
 
     // Get user growth over time (last 12 months)
     const twelveMonthsAgo = new Date();
     twelveMonthsAgo.setMonth(twelveMonthsAgo.getMonth() - 12);
     
-    const monthlyGrowth = await User.aggregate([
-      {
-        $match: {
-          createdAt: { $gte: twelveMonthsAgo }
-        }
-      },
-      {
-        $group: {
-          _id: {
-            year: { $year: '$createdAt' },
-            month: { $month: '$createdAt' }
-          },
-          count: { $sum: 1 }
-        }
-      },
-      {
-        $sort: { '_id.year': 1, '_id.month': 1 }
-      }
-    ]);
+    // Group by month manually since Supabase doesn't have aggregate
+    const allUsers12Months = await userService.find({});
+    const filteredUsers = allUsers12Months.filter(u => new Date(u.createdAt) >= twelveMonthsAgo);
+    const monthlyGrowthMap = {};
+    
+    filteredUsers.forEach(user => {
+      const date = new Date(user.createdAt);
+      const key = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
+      monthlyGrowthMap[key] = (monthlyGrowthMap[key] || 0) + 1;
+    });
+    
+    const monthlyGrowth = Object.entries(monthlyGrowthMap)
+      .map(([month, count]) => ({ month, count }))
+      .sort((a, b) => a.month.localeCompare(b.month));
 
     // Get NFT contract stats if contract address is available
     let totalNFTs = 0;
@@ -626,10 +726,7 @@ export const getAnalytics = async (req, res) => {
           withoutWallets: totalUsers - usersWithWallets,
           newLast7Days: newUsersLast7Days,
           newLast30Days: newUsersLast30Days,
-          monthlyGrowth: monthlyGrowth.map(item => ({
-            month: `${item._id.year}-${String(item._id.month).padStart(2, '0')}`,
-            count: item.count
-          }))
+          monthlyGrowth: monthlyGrowth
         },
         nfts: {
           total: totalNFTs
@@ -653,25 +750,19 @@ export const getDashboardStats = async (req, res) => {
     );
 
     // Get various stats
-    const [
-      totalUsers,
-      usersWithWallets,
-      newUsersToday,
-      newUsersThisWeek,
-      newUsersThisMonth
-    ] = await Promise.all([
-      User.countDocuments(),
-      User.countDocuments({ walletAddress: { $ne: null } }),
-      User.countDocuments({
-        createdAt: { $gte: new Date(new Date().setHours(0, 0, 0, 0)) }
-      }),
-      User.countDocuments({
-        createdAt: { $gte: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000) }
-      }),
-      User.countDocuments({
-        createdAt: { $gte: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000) }
-      })
-    ]);
+    const allUsers = await userService.find({});
+    const totalUsers = allUsers.length;
+    const usersWithWallets = allUsers.filter(u => u.walletAddress !== null && u.walletAddress !== '').length;
+    
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const newUsersToday = allUsers.filter(u => new Date(u.createdAt) >= today).length;
+    
+    const weekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+    const newUsersThisWeek = allUsers.filter(u => new Date(u.createdAt) >= weekAgo).length;
+    
+    const monthAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+    const newUsersThisMonth = allUsers.filter(u => new Date(u.createdAt) >= monthAgo).length;
 
     // Get NFT count
     let totalNFTs = 0;
@@ -690,10 +781,10 @@ export const getDashboardStats = async (req, res) => {
     }
 
     // Get recent users (last 10)
-    const recentUsers = await User.find()
-      .select('-password')
-      .sort({ createdAt: -1 })
-      .limit(10);
+    const recentUsers = await userService.find({}, {
+      sort: { createdAt: -1 },
+      limit: 10
+    });
 
     res.status(200).json({
       success: true,
@@ -709,13 +800,16 @@ export const getDashboardStats = async (req, res) => {
           thisWeek: newUsersThisWeek,
           thisMonth: newUsersThisMonth
         },
-        recentUsers: recentUsers.map(user => ({
-          id: user._id.toString(),
-          email: user.email,
-          name: user.name,
-          walletAddress: user.walletAddress,
-          createdAt: user.createdAt
-        }))
+        recentUsers: recentUsers.map(user => {
+          const { password, ...userWithoutPassword } = user;
+          return {
+            id: user.id,
+            email: user.email,
+            name: user.name,
+            walletAddress: user.walletAddress,
+            createdAt: user.createdAt
+          };
+        })
       }
     });
   } catch (error) {

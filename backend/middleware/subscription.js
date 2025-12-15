@@ -1,4 +1,4 @@
-import User from '../models/User.js';
+import { userService } from '../services/userService.js';
 
 /**
  * Middleware to check if user has active subscription
@@ -11,7 +11,7 @@ export const checkSubscription = async (req, res, next) => {
       return res.status(401).json({ error: 'Authentication required' });
     }
 
-    const user = await User.findById(userId);
+    const user = await userService.findById(userId);
     
     if (!user) {
       return res.status(404).json({ error: 'User not found' });
@@ -27,9 +27,10 @@ export const checkSubscription = async (req, res, next) => {
     }
 
     // Check if subscription has expired
-    if (user.subscriptionEndDate && new Date() > user.subscriptionEndDate) {
-      user.subscriptionStatus = 'expired';
-      await user.save();
+    if (user.subscriptionEndDate && new Date() > new Date(user.subscriptionEndDate)) {
+      await userService.update(userId, {
+        subscriptionStatus: 'expired'
+      });
       
       return res.status(403).json({ 
         error: 'Your subscription has expired',
@@ -60,7 +61,7 @@ export const checkFileSizeLimit = async (req, res, next) => {
       return res.status(400).json({ error: 'No file provided' });
     }
 
-    const user = await User.findById(userId);
+    const user = await userService.findById(userId);
     
     if (!user) {
       return res.status(404).json({ error: 'User not found' });

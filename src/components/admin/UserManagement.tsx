@@ -26,6 +26,31 @@ const UserManagement = ({ onViewUserDetails }: UserManagementProps) => {
   const [editingUser, setEditingUser] = useState<User | null>(null);
   const [editForm, setEditForm] = useState({ name: '', email: '', walletAddress: '' });
 
+  // Helper function to get display name
+  const getDisplayName = (user: User): string => {
+    // If name exists and is not empty (handle both null and empty string)
+    const userName = user.name?.trim();
+    if (userName && userName !== '') {
+      return userName;
+    }
+    
+    // Otherwise, extract name from email (part before @)
+    if (user.email) {
+      const emailPart = user.email.split('@')[0];
+      // Capitalize first letter and format nicely
+      // Replace dots, underscores, dashes with spaces, then capitalize each word
+      const formatted = emailPart
+        .replace(/[._-]/g, ' ')
+        .split(' ')
+        .map(word => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
+        .join(' ');
+      return formatted;
+    }
+    
+    // Final fallback
+    return 'User';
+  };
+
   useEffect(() => {
     fetchUsers();
   }, [page, searchQuery]);
@@ -135,7 +160,7 @@ const UserManagement = ({ onViewUserDetails }: UserManagementProps) => {
                         <User className="h-5 w-5 text-white" />
                       </div>
                       <div>
-                        <p className="text-white font-medium">{user.name || 'No name'}</p>
+                        <p className="text-white font-medium">{getDisplayName(user)}</p>
                         {user.role === 'admin' && (
                           <span className="text-xs bg-purple-500/20 text-purple-400 px-2 py-0.5 rounded">
                             Admin

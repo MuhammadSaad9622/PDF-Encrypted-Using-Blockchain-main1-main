@@ -48,6 +48,30 @@ const AdminDashboard = () => {
   const [stats, setStats] = useState<DashboardStats | null>(null);
   const [analytics, setAnalytics] = useState<any>(null);
   const [loading, setLoading] = useState(true);
+
+  // Helper function to get display name (same as UserManagement)
+  const getDisplayName = (user: { name?: string | null; email?: string }): string => {
+    // If name exists and is not empty (handle both null and empty string)
+    const userName = user.name?.trim();
+    if (userName && userName !== '') {
+      return userName;
+    }
+    
+    // Otherwise, extract name from email (part before @)
+    if (user.email) {
+      const emailPart = user.email.split('@')[0];
+      // Replace dots, underscores, dashes with spaces, then capitalize each word
+      const formatted = emailPart
+        .replace(/[._-]/g, ' ')
+        .split(' ')
+        .map(word => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
+        .join(' ');
+      return formatted;
+    }
+    
+    // Final fallback
+    return 'User';
+  };
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [activeTab, setActiveTab] = useState<'dashboard' | 'users' | 'analytics' | 'billing' | 'access-codes' | 'user-details'>('dashboard');
   const [adminUser, setAdminUser] = useState<any>(null);
@@ -116,21 +140,21 @@ const AdminDashboard = () => {
 
   if (loading && !stats) {
     return (
-      <div className="flex items-center justify-center min-h-screen bg-gradient-to-br from-gray-900 via-purple-900 to-gray-900">
+      <div className="flex items-center justify-center h-screen bg-gradient-to-br from-gray-900 via-purple-900 to-gray-900">
         <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-purple-500"></div>
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-gray-900 via-purple-900 to-gray-900 flex">
+    <div className="h-screen bg-gradient-to-br from-gray-900 via-purple-900 to-gray-900 flex overflow-hidden">
       {/* Sidebar */}
       <aside
         className={`${
           sidebarOpen ? 'w-64' : 'w-0'
-        } bg-gray-900/80 backdrop-blur-sm border-r border-gray-800 transition-all duration-300 overflow-hidden relative z-10`}
+        } bg-gray-900/80 backdrop-blur-sm border-r border-gray-800 transition-all duration-300 overflow-hidden relative z-10 flex-shrink-0`}
       >
-        <div className="h-full flex flex-col">
+        <div className="h-full flex flex-col overflow-hidden">
           {/* Logo/Header */}
           <div className="p-6 border-b border-gray-800">
             <div className="flex items-center justify-between">
@@ -199,9 +223,9 @@ const AdminDashboard = () => {
       </aside>
 
       {/* Main Content */}
-      <div className="flex-1 flex flex-col overflow-hidden">
+      <div className="flex-1 flex flex-col overflow-hidden min-w-0">
         {/* Top Bar */}
-        <header className="bg-gray-900/50 backdrop-blur-sm border-b border-gray-800 px-6 py-4">
+        <header className="bg-gray-900/50 backdrop-blur-sm border-b border-gray-800 px-6 py-4 flex-shrink-0">
           <div className="flex items-center justify-between">
             <button
               onClick={() => setSidebarOpen(true)}
@@ -221,7 +245,7 @@ const AdminDashboard = () => {
         </header>
 
         {/* Page Content */}
-        <main className="flex-1 overflow-y-auto p-6">
+        <main className="flex-1 overflow-y-auto p-6 min-h-0">
           {activeTab === 'dashboard' && stats && (
             <div className="space-y-6">
               {/* Stats Cards */}
@@ -310,7 +334,7 @@ const AdminDashboard = () => {
                         {stats.recentUsers.map((user) => (
                           <tr key={user.id} className="border-b border-gray-800 hover:bg-gray-800/50">
                             <td className="py-3 px-4 text-white">{user.email}</td>
-                            <td className="py-3 px-4 text-gray-300">{user.name || 'N/A'}</td>
+                            <td className="py-3 px-4 text-gray-300">{getDisplayName(user)}</td>
                             <td className="py-3 px-4 text-gray-400 text-sm">
                               {new Date(user.createdAt).toLocaleDateString()}
                             </td>

@@ -181,7 +181,7 @@ const Dashboard = () => {
   };
 
   return (
-    <div className="min-h-screen bg-dark-bg flex">
+    <div className="h-screen bg-dark-bg flex overflow-hidden">
       {/* Mobile Overlay */}
       {sidebarOpen && (
         <div
@@ -196,9 +196,9 @@ const Dashboard = () => {
           sidebarOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'
         } ${
           sidebarOpen ? 'w-64' : 'w-0 lg:w-64'
-        } fixed lg:static h-screen bg-dark-card border-r border-gray-800 transition-all duration-300 overflow-hidden z-50 lg:z-10`}
+        } fixed lg:static h-screen bg-dark-card border-r border-gray-800 transition-all duration-300 overflow-hidden z-50 lg:z-10 flex-shrink-0`}
       >
-        <div className="h-full flex flex-col">
+        <div className="h-full flex flex-col overflow-hidden">
           {/* Logo/Header */}
           <div className="p-4 lg:p-6 border-b border-gray-800">
             <div className="flex items-center justify-between">
@@ -268,9 +268,9 @@ const Dashboard = () => {
       </aside>
 
       {/* Main Content */}
-      <div className="flex-1 flex flex-col overflow-hidden">
+      <div className="flex-1 flex flex-col overflow-hidden min-w-0">
         {/* Top Bar */}
-        <header className="bg-dark-card border-b border-gray-800 px-4 lg:px-6 py-3 lg:py-4 relative z-20">
+        <header className="bg-dark-card border-b border-gray-800 px-4 lg:px-6 py-3 lg:py-4 relative z-20 flex-shrink-0">
           <div className="flex items-center justify-between">
             <button
               onClick={() => setSidebarOpen(true)}
@@ -369,7 +369,7 @@ const Dashboard = () => {
         </header>
 
         {/* Page Content */}
-        <main className="flex-1 overflow-y-auto p-4 lg:p-6">
+        <main className="flex-1 overflow-y-auto p-4 lg:p-6 min-h-0">
           <Outlet />
         </main>
       </div>

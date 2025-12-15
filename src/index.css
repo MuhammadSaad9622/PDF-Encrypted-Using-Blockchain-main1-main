@@ -22,6 +22,21 @@
     --border-color: #e5e7eb;
   }
 
+  html,
+  body {
+    margin: 0;
+    padding: 0;
+    height: 100%;
+    width: 100%;
+    overflow: hidden;
+  }
+
+  #root {
+    height: 100%;
+    width: 100%;
+    overflow: hidden;
+  }
+
   body {
     background-color: var(--dark-bg);
     color: var(--text-primary);

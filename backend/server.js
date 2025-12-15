@@ -2,7 +2,6 @@ import express from 'express';
 import fileUpload from 'express-fileupload';
 import cors from 'cors';
 import dotenv from 'dotenv';
-import mongoose from 'mongoose';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
 import fs from 'fs';
@@ -16,7 +15,6 @@ console.log('PRIVATE_KEY:', process.env.PRIVATE_KEY ? 'Set' : 'Not set');
 console.log('POLYGON_MAINNET_RPC_URL:', process.env.POLYGON_MAINNET_RPC_URL || 'Using default');
 console.log('BUNDLR_NODE:', process.env.BUNDLR_NODE || 'Using default');
 console.log('BUNDLR_CURRENCY:', process.env.BUNDLR_CURRENCY || 'Using default');
-console.log('MONGODB_URI:', process.env.MONGODB_URI ? 'Set' : 'Not set');
 
 // Import routes
 import pdfRoutes from './routes/pdfRoutes.js';
@@ -71,74 +69,50 @@ app.use((req, res, next) => {
   next();
 });
 
-// Routes - Register before MongoDB check to avoid 404s
+// Routes
 app.use('/api/auth', authRoutes);
 app.use('/api/stats', statsRoutes);
 app.use('/api/admin', adminRoutes);
 app.use('/api/payments', paymentRoutes);
 app.use('/api', pdfRoutes);
 
-// Middleware to check MongoDB connection (only for routes that need it)
-app.use((req, res, next) => {
-  if (req.path.startsWith('/api/auth/signup') || req.path.startsWith('/api/auth/signin')) {
-    return next();
-  }
+// All routes now use Supabase - no MongoDB checks needed
 
-  if (mongoose.connection.readyState !== 1) {
-    return res.status(503).json({
-      error: 'Database not connected. Please try again in a moment.'
-    });
-  }
-  next();
-});
-
-// Connect to MongoDB
-const MONGODB_URI = process.env.MONGODB_URI || 'mongodb://localhost:27017/pdf-encryption';
-
-// Connect to MongoDB before starting server
+// Start server - all data now uses Supabase
 const startServer = async () => {
   try {
-    await mongoose.connect(MONGODB_URI, {
-      serverSelectionTimeoutMS: 10000,
-      socketTimeoutMS: 45000,
-      connectTimeoutMS: 10000,
-      retryWrites: true,
-      retryReads: true
-    });
-    console.log('Connected to MongoDB');
 
-    // Create default admin user if it doesn't exist
+    // Create default admin user if it doesn't exist (using Supabase)
     try {
-      const User = (await import('./models/User.js')).default;
+      const { userService } = await import('./services/userService.js');
       const adminEmail = 'admin@gmail.com';
       const adminPassword = 'admin123';
 
-      let admin = await User.findOne({ email: adminEmail });
+      let admin = await userService.findByEmail(adminEmail);
       if (!admin) {
-        admin = new User({
+        admin = await userService.create({
           email: adminEmail,
           password: adminPassword,
           role: 'admin',
           name: 'Admin'
         });
-        await admin.save();
         console.log('✅ Default admin user created: admin@gmail.com / admin123');
       } else {
-        let needsSave = false;
+        let needsUpdate = false;
+        const updateData = {};
 
         if (admin.role !== 'admin') {
-          admin.role = 'admin';
-          needsSave = true;
+          updateData.role = 'admin';
+          needsUpdate = true;
         }
 
         if (!admin.password) {
-          admin.password = adminPassword;
-          admin.markModified('password');
-          needsSave = true;
+          updateData.password = adminPassword;
+          needsUpdate = true;
         }
 
-        if (needsSave) {
-          await admin.save();
+        if (needsUpdate) {
+          await userService.update(admin.id, updateData);
           console.log('✅ Admin user updated: admin@gmail.com');
         } else {
           console.log('✅ Admin user verified: admin@gmail.com');
@@ -146,30 +120,9 @@ const startServer = async () => {
       }
     } catch (adminError) {
       console.warn('Could not create default admin:', adminError.message);
+      console.warn('Make sure Supabase is configured and the users table exists.');
     }
 
-    // Drop old username index
-    try {
-      const db = mongoose.connection.db;
-      const usersCollection = db.collection('users');
-      const indexes = await usersCollection.indexes();
-
-      for (const index of indexes) {
-        if (index.key && index.key.username) {
-          const indexName =
-            index.name || Object.keys(index.key).map(k => `${k}_${index.key[k]}`).join('_');
-
-          try {
-            await usersCollection.dropIndex(indexName);
-            console.log(`Dropped old username index: ${indexName}`);
-          } catch (dropError) {
-            console.log(`Could not drop index ${indexName}:`, dropError.message);
-          }
-        }
-      }
-    } catch (indexError) {
-      console.log('No username index to drop (or already dropped)');
-    }
 
     // Serve static frontend in production
     if (process.env.NODE_ENV === 'production') {

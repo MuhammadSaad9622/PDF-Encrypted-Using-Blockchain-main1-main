@@ -265,18 +265,15 @@ export const decryptFile = async (req, res) => {
     }
 
     // First, verify ownership via database (userId)
-    const NFT = (await import('../models/NFT.js')).default;
-    const nftRecord = await NFT.findOne({ tokenId: tokenId.toString() });
+    const { nftService } = await import('../services/nftService.js');
+    const nftRecord = await nftService.findByTokenId(tokenId.toString());
 
     if (!nftRecord) {
       return res.status(404).json({ error: 'NFT not found' });
     }
 
-    // Check if user owns this NFT via userId
-    const mongoose = (await import('mongoose')).default;
-    const userIdObjectId = typeof userId === 'string' ? new mongoose.Types.ObjectId(userId) : userId;
-    
-    if (!nftRecord.userId || nftRecord.userId.toString() !== userIdObjectId.toString()) {
+    // Check if user owns this NFT via userId (now using UUID)
+    if (!nftRecord.userId || nftRecord.userId !== userId) {
       // Fallback: If no userId stored, check blockchain ownership
       // (for backward compatibility with older NFTs)
       const { walletAddress } = req.body;
@@ -404,8 +401,8 @@ export const decryptFile = async (req, res) => {
       
       // Try to get encryption details from database (stored during minting)
       try {
-        const NFT = (await import('../models/NFT.js')).default;
-        const nftRecord = await NFT.findOne({ tokenId: tokenId.toString() });
+        const { nftService } = await import('../services/nftService.js');
+        const nftRecord = await nftService.findByTokenId(tokenId.toString());
         
         if (nftRecord && nftRecord.encryptionKey) {
           console.log(`✅ Found NFT record in database for tokenId ${tokenId}`);
@@ -1093,11 +1090,11 @@ export const getNFTMetadata = async (req, res) => {
       console.log('getNFTMetadata: Arweave fetch failed, trying to fetch from database...');
       
       try {
-        const NFT = (await import('../models/NFT.js')).default;
+        const { nftService } = await import('../services/nftService.js');
         const { generateMetadata } = await import('../utils/generateMetadata.js');
         
         // Try to find NFT in database
-        const nftRecord = await NFT.findOne({ tokenId: tokenId.toString() });
+        const nftRecord = await nftService.findByTokenId(tokenId.toString());
         
         if (nftRecord) {
           console.log('getNFTMetadata: Found NFT in database, constructing metadata...');
@@ -1283,8 +1280,8 @@ export const automatedUploadAndMint = async (req, res) => {
     }
 
     // Check subscription status
-    const User = (await import('../models/User.js')).default;
-    const user = await User.findById(userId);
+    const { userService } = await import('../services/userService.js');
+    const user = await userService.findById(userId);
     if (!user) {
       return res.status(404).json({ error: 'User not found' });
     }
@@ -1299,9 +1296,10 @@ export const automatedUploadAndMint = async (req, res) => {
     }
 
     // Check if subscription has expired
-    if (user.subscriptionEndDate && new Date() > user.subscriptionEndDate) {
-      user.subscriptionStatus = 'expired';
-      await user.save();
+    if (user.subscriptionEndDate && new Date() > new Date(user.subscriptionEndDate)) {
+      await userService.update(userId, {
+        subscriptionStatus: 'expired'
+      });
       return res.status(403).json({ 
         error: 'Your subscription has expired. Please renew your subscription to continue uploading files.',
         requiresSubscription: true,
@@ -1505,9 +1503,8 @@ export const automatedUploadAndMint = async (req, res) => {
     // Only store if tokenId is available
     if (mintResult.tokenId) {
       try {
-        const NFT = (await import('../models/NFT.js')).default;
-        const mongoose = (await import('mongoose')).default;
-        await NFT.findOneAndUpdate(
+        const { nftService } = await import('../services/nftService.js');
+        await nftService.findOneAndUpdate(
           { tokenId: mintResult.tokenId.toString() },
           {
             tokenId: mintResult.tokenId.toString(),
@@ -1517,18 +1514,21 @@ export const automatedUploadAndMint = async (req, res) => {
             arweaveId: arweaveId,
             arweaveUrl: arweaveUrl,
             recipientAddress: finalRecipientAddress,
-            userId: new mongoose.Types.ObjectId(userId), // Link NFT to user account
+            userId: userId, // Link NFT to user account (UUID)
             originalName: pdfFile.name, // Store original file name
             fileSize: fileSizeBytes // Store original file size in bytes
           },
-          { upsert: true, new: true }
+          { upsert: true }
         );
         console.log(`✅ Stored NFT details in database for tokenId ${mintResult.tokenId} linked to userId ${userId}`);
         
         // Update user's total file size used
-        await User.findByIdAndUpdate(userId, {
-          $inc: { totalFileSizeUsed: fileSizeBytes }
-        });
+        const currentUser = await userService.findById(userId);
+        if (currentUser) {
+          await userService.update(userId, {
+            totalFileSizeUsed: (currentUser.totalFileSizeUsed || 0) + fileSizeBytes
+          });
+        }
         console.log(`✅ Updated user's total file size: ${currentUsed + fileSizeBytes} bytes (${((currentUsed + fileSizeBytes) / (1024 * 1024)).toFixed(2)} MB)`);
       } catch (dbError) {
         console.error('⚠️ Failed to store NFT details in database (non-critical):', dbError.message);

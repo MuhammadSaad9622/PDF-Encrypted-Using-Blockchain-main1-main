@@ -1,6 +1,6 @@
 import pkg from 'square';
-import Invoice from '../models/Invoice.js';
-import User from '../models/User.js';
+import { invoiceService } from '../services/invoiceService.js';
+import { userService } from '../services/userService.js';
 import crypto from 'crypto';
 
 const { SquareClient, SquareEnvironment } = pkg;
@@ -138,7 +138,7 @@ export const createSubscriptionPayment = async (req, res) => {
     const amount = 10.00; // $10 per month
     const currency = 'USD';
 
-    const user = await User.findById(userId);
+    const user = await userService.findById(userId);
     if (!user) {
       return res.status(404).json({ error: 'User not found' });
     }
@@ -151,7 +151,7 @@ export const createSubscriptionPayment = async (req, res) => {
 
     // Create invoice
     const invoiceId = `INV-${Date.now()}-${crypto.randomBytes(4).toString('hex')}`;
-    const invoice = new Invoice({
+    const invoice = await invoiceService.create({
       invoiceId,
       invoiceNumber: invoiceId, // Use invoiceId as invoiceNumber to ensure uniqueness
       userId,
@@ -164,7 +164,6 @@ export const createSubscriptionPayment = async (req, res) => {
       subscriptionStartDate: null, // Will be set after payment
       subscriptionEndDate: null
     });
-    await invoice.save();
 
     // Access Square Orders API
     // In Square SDK v42, APIs are accessed as getters: client.orders (not ordersApi)
@@ -223,8 +222,9 @@ export const createSubscriptionPayment = async (req, res) => {
     }
     
     // Update invoice with Square order ID
-    invoice.squareOrderId = response.order.id;
-    await invoice.save();
+    await invoiceService.update(invoice.id, {
+      squareOrderId: response.order.id
+    });
 
     res.status(200).json({
       success: true,
@@ -313,13 +313,10 @@ export const processSubscriptionPayment = async (req, res) => {
       });
     }
 
-    const invoice = await Invoice.findOne({ 
-      invoiceId,
-      userId,
-      status: 'Pending'
-    });
-
-    if (!invoice) {
+    // Find invoice by invoiceId and userId
+    const invoice = await invoiceService.findByInvoiceId(invoiceId);
+    
+    if (!invoice || invoice.userId !== userId || invoice.status !== 'Pending') {
       return res.status(404).json({ error: 'Invoice not found' });
     }
 
@@ -374,32 +371,32 @@ export const processSubscriptionPayment = async (req, res) => {
       const paymentStatus = response.payment.status;
       
       // Update invoice
-      invoice.status = paymentStatus === 'COMPLETED' ? 'Paid' : 'Pending';
-      invoice.squarePaymentId = response.payment.id;
-      invoice.transactionHash = response.payment.id;
+      const updateData = {
+        status: paymentStatus === 'COMPLETED' ? 'Paid' : 'Pending',
+        squarePaymentId: response.payment.id,
+        transactionHash: response.payment.id
+      };
       
       // Activate user subscription
       if (paymentStatus === 'COMPLETED') {
-        const user = await User.findById(userId);
-        if (user) {
-          const startDate = new Date();
-          const endDate = new Date();
-          endDate.setMonth(endDate.getMonth() + 1); // 1 month subscription
-          
-          invoice.subscriptionStartDate = startDate;
-          invoice.subscriptionEndDate = endDate;
-          
-          user.subscriptionStatus = 'active';
-          user.subscriptionStartDate = startDate;
-          user.subscriptionEndDate = endDate;
-          user.fileSizeLimit = 250 * 1024 * 1024; // 250MB
-          user.totalFileSizeUsed = 0; // Reset on new subscription
-          user.lastSubscriptionInvoiceId = invoice.invoiceId;
-          await user.save();
-        }
+        const startDate = new Date();
+        const endDate = new Date();
+        endDate.setMonth(endDate.getMonth() + 1); // 1 month subscription
+        
+        updateData.subscriptionStartDate = startDate;
+        updateData.subscriptionEndDate = endDate;
+        
+        await userService.update(userId, {
+          subscriptionStatus: 'active',
+          subscriptionStartDate: startDate,
+          subscriptionEndDate: endDate,
+          fileSizeLimit: 250 * 1024 * 1024, // 250MB
+          totalFileSizeUsed: 0, // Reset on new subscription
+          lastSubscriptionInvoiceId: invoice.invoiceId
+        });
       }
       
-      await invoice.save();
+      await invoiceService.update(invoice.id, updateData);
 
       res.status(200).json({
         success: true,
@@ -470,37 +467,39 @@ export const handleSquareWebhook = async (req, res) => {
 
       const paymentId = payment.id;
       
-      const invoice = await Invoice.findOne({ 
-        squarePaymentId: paymentId 
-      });
+      const invoice = await invoiceService.findBySquarePaymentId(paymentId);
 
       if (invoice && invoice.status !== 'Paid') {
         if (payment.status === 'COMPLETED') {
-          invoice.status = 'Paid';
-          invoice.subscriptionStartDate = new Date();
-          
+          const startDate = new Date();
           const endDate = new Date();
           endDate.setMonth(endDate.getMonth() + 1); // 1 month subscription
-          invoice.subscriptionEndDate = endDate;
+          
+          await invoiceService.update(invoice.id, {
+            status: 'Paid',
+            subscriptionStartDate: startDate,
+            subscriptionEndDate: endDate
+          });
           
           // Activate user subscription
-          const user = await User.findById(invoice.userId);
+          const user = await userService.findById(invoice.userId);
           if (user) {
-            user.subscriptionStatus = 'active';
-            user.subscriptionStartDate = invoice.subscriptionStartDate;
-            user.subscriptionEndDate = invoice.subscriptionEndDate;
-            user.fileSizeLimit = 250 * 1024 * 1024;
-            user.totalFileSizeUsed = 0;
-            user.lastSubscriptionInvoiceId = invoice.invoiceId;
-            await user.save();
+            await userService.update(invoice.userId, {
+              subscriptionStatus: 'active',
+              subscriptionStartDate: startDate,
+              subscriptionEndDate: endDate,
+              fileSizeLimit: 250 * 1024 * 1024,
+              totalFileSizeUsed: 0,
+              lastSubscriptionInvoiceId: invoice.invoiceId
+            });
             console.log(`✅ Subscription activated for user ${user.email}`);
           }
           
         } else if (payment.status === 'FAILED' || payment.status === 'CANCELED') {
-          invoice.status = 'Failed';
+          await invoiceService.update(invoice.id, {
+            status: 'Failed'
+          });
         }
-        
-        await invoice.save();
       }
     }
 
@@ -519,9 +518,7 @@ export const getSubscriptionStatus = async (req, res) => {
   try {
     const userId = req.userId;
     
-    const user = await User.findById(userId).select(
-      'subscriptionStatus subscriptionStartDate subscriptionEndDate totalFileSizeUsed fileSizeLimit'
-    );
+    const user = await userService.findById(userId);
     
     if (!user) {
       return res.status(404).json({ error: 'User not found' });

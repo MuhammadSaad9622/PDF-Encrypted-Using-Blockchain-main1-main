@@ -354,7 +354,15 @@ const UserDetails = ({ userId, onBack }: UserDetailsProps) => {
             </div>
             <div>
               <div className="flex items-center space-x-3">
-                <h2 className="text-2xl font-bold text-white">{userDetails.name || 'No name'}</h2>
+                <h2 className="text-2xl font-bold text-white">
+                  {userDetails.name?.trim() || (userDetails.email ? 
+                    userDetails.email.split('@')[0]
+                      .replace(/[._-]/g, ' ')
+                      .split(' ')
+                      .map((word: string) => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
+                      .join(' ')
+                    : 'User')}
+                </h2>
                 {userDetails.isSuspended && (
                   <span className="px-3 py-1 rounded-full text-xs font-semibold bg-red-500/20 text-red-400 flex items-center space-x-1">
                     <XCircle className="h-3 w-3" />

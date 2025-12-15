@@ -1,4 +1,4 @@
-import User from '../models/User.js';
+import { userService } from '../services/userService.js';
 import { getUserNFTsFromDB } from '../utils/nftUtils.js';
 
 // Get user statistics from database (no wallet/blockchain required)
@@ -11,7 +11,7 @@ export const getUserStats = async (req, res) => {
     }
 
     // Verify user exists
-    const user = await User.findById(userId);
+    const user = await userService.findById(userId);
     if (!user) {
       return res.status(404).json({ error: 'User not found' });
     }
@@ -25,19 +25,18 @@ export const getUserStats = async (req, res) => {
     
     // If still 0, try one more time with a direct query to see what's in DB
     if (totalNFTs === 0) {
-      const mongoose = (await import('mongoose')).default;
-      const NFT = (await import('../models/NFT.js')).default;
+      const { nftService } = await import('../services/nftService.js');
       
       // Check total NFTs in database
-      const allCount = await NFT.countDocuments({});
+      const allCount = await nftService.count({});
       console.log(`[Stats] Total NFTs in database: ${allCount}`);
       
       if (allCount > 0) {
         // Get a sample to see what userId format they have
-        const sample = await NFT.find({}).limit(3).select('tokenId userId');
+        const sample = await nftService.find({}, { limit: 3 });
         console.log(`[Stats] Sample NFT userIds:`, sample.map(n => ({
           tokenId: n.tokenId,
-          userId: n.userId ? (typeof n.userId === 'string' ? n.userId : n.userId.toString()) : 'null',
+          userId: n.userId || 'null',
           userIdType: n.userId ? typeof n.userId : 'null'
         })));
       }

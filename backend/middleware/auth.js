@@ -1,5 +1,5 @@
 import jwt from 'jsonwebtoken';
-import User from '../models/User.js';
+import { userService } from '../services/userService.js';
 
 const JWT_SECRET = process.env.JWT_SECRET || 'your-secret-key-change-in-production';
 
@@ -15,7 +15,7 @@ export const authenticate = async (req, res, next) => {
     req.userId = decoded.userId;
     
     // Check if user is suspended
-    const user = await User.findById(decoded.userId).select('isSuspended suspendedReason');
+    const user = await userService.findById(decoded.userId);
     if (user && user.isSuspended) {
       return res.status(403).json({ 
         error: 'Your account has been suspended',

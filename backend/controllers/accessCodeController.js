@@ -1,4 +1,4 @@
-import AccessCode from '../models/AccessCode.js';
+import { accessCodeService } from '../services/accessCodeService.js';
 
 // Validate access code
 export const validateAccessCode = async (req, res) => {
@@ -10,7 +10,7 @@ export const validateAccessCode = async (req, res) => {
     }
 
     const normalizedCode = code.toUpperCase().trim();
-    const accessCode = await AccessCode.findOne({ code: normalizedCode });
+    const accessCode = await accessCodeService.findByCode(normalizedCode);
 
     if (!accessCode) {
       return res.status(404).json({ 
@@ -19,7 +19,7 @@ export const validateAccessCode = async (req, res) => {
       });
     }
 
-    const validation = accessCode.isValid();
+    const validation = accessCodeService.isValid(accessCode);
     
     if (!validation.valid) {
       return res.status(400).json({ 
@@ -53,12 +53,12 @@ export const createAccessCode = async (req, res) => {
     const normalizedCode = code.toUpperCase().trim();
 
     // Check if code already exists
-    const existing = await AccessCode.findOne({ code: normalizedCode });
+    const existing = await accessCodeService.findByCode(normalizedCode);
     if (existing) {
       return res.status(400).json({ error: 'Access code already exists' });
     }
 
-    const accessCode = new AccessCode({
+    const accessCode = await accessCodeService.create({
       code: normalizedCode,
       maxUses: maxUses || null,
       expiresAt: expiresAt ? new Date(expiresAt) : null,
@@ -68,12 +68,10 @@ export const createAccessCode = async (req, res) => {
       createdBy: req.userId || null
     });
 
-    await accessCode.save();
-
     res.status(201).json({
       success: true,
       accessCode: {
-        id: accessCode._id.toString(),
+        id: accessCode.id,
         code: accessCode.code,
         isActive: accessCode.isActive,
         maxUses: accessCode.maxUses,
@@ -108,18 +106,41 @@ export const getAccessCodes = async (req, res) => {
       query.isActive = req.query.isActive === 'true';
     }
 
-    const accessCodes = await AccessCode.find(query)
-      .sort({ createdAt: -1 })
-      .skip(skip)
-      .limit(limit)
-      .populate('createdBy', 'name email');
+    const accessCodes = await accessCodeService.find(query, {
+      sort: { createdAt: -1 },
+      skip,
+      limit
+    });
 
-    const total = await AccessCode.countDocuments(query);
+    // Get createdBy user info for each code
+    const accessCodesWithUsers = await Promise.all(accessCodes.map(async (ac) => {
+      let createdByUser = null;
+      if (ac.createdBy) {
+        try {
+          const { userService } = await import('../services/userService.js');
+          createdByUser = await userService.findById(ac.createdBy);
+          if (createdByUser) {
+            createdByUser = {
+              name: createdByUser.name,
+              email: createdByUser.email
+            };
+          }
+        } catch (e) {
+          // User not found, leave as null
+        }
+      }
+      return {
+        ...ac,
+        createdBy: createdByUser
+      };
+    }));
+
+    const total = await accessCodeService.count(query);
 
     res.status(200).json({
       success: true,
-      accessCodes: accessCodes.map(ac => ({
-        id: ac._id.toString(),
+      accessCodes: accessCodesWithUsers.map(ac => ({
+        id: ac.id,
         code: ac.code,
         isActive: ac.isActive,
         maxUses: ac.maxUses,
@@ -152,24 +173,23 @@ export const updateAccessCode = async (req, res) => {
     const { id } = req.params;
     const { isActive, maxUses, expiresAt, description, subscriptionPlan, subscriptionDuration } = req.body;
 
-    const accessCode = await AccessCode.findById(id);
+    const updateData = {};
+    if (isActive !== undefined) updateData.isActive = isActive;
+    if (maxUses !== undefined) updateData.maxUses = maxUses;
+    if (expiresAt !== undefined) updateData.expiresAt = expiresAt ? new Date(expiresAt) : null;
+    if (description !== undefined) updateData.description = description;
+    if (subscriptionPlan !== undefined) updateData.subscriptionPlan = subscriptionPlan || null;
+    if (subscriptionDuration !== undefined) updateData.subscriptionDuration = subscriptionDuration || null;
+
+    const accessCode = await accessCodeService.update(id, updateData);
     if (!accessCode) {
       return res.status(404).json({ error: 'Access code not found' });
     }
 
-    if (isActive !== undefined) accessCode.isActive = isActive;
-    if (maxUses !== undefined) accessCode.maxUses = maxUses;
-    if (expiresAt !== undefined) accessCode.expiresAt = expiresAt ? new Date(expiresAt) : null;
-    if (description !== undefined) accessCode.description = description;
-    if (subscriptionPlan !== undefined) accessCode.subscriptionPlan = subscriptionPlan || null;
-    if (subscriptionDuration !== undefined) accessCode.subscriptionDuration = subscriptionDuration || null;
-
-    await accessCode.save();
-
     res.status(200).json({
       success: true,
       accessCode: {
-        id: accessCode._id.toString(),
+        id: accessCode.id,
         code: accessCode.code,
         isActive: accessCode.isActive,
         maxUses: accessCode.maxUses,
@@ -192,10 +212,12 @@ export const deleteAccessCode = async (req, res) => {
   try {
     const { id } = req.params;
 
-    const accessCode = await AccessCode.findByIdAndDelete(id);
+    const accessCode = await accessCodeService.findById(id);
     if (!accessCode) {
       return res.status(404).json({ error: 'Access code not found' });
     }
+
+    await accessCodeService.delete(id);
 
     res.status(200).json({
       success: true,

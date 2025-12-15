@@ -81,7 +81,8 @@ const BillingInvoices = () => {
               <DollarSign className="h-6 w-6 text-green-400" />
             </div>
             <h3 className="text-gray-400 text-sm font-medium mb-2">Total Amount</h3>
-            <p className="text-3xl font-bold text-white">{summary.totalAmount} MATIC</p>
+            <p className="text-3xl font-bold text-white">{summary.totalAmount}</p>
+            <p className="text-xs text-gray-500 mt-1">USD</p>
           </div>
 
           <div className="card-dark">
@@ -145,15 +146,19 @@ const BillingInvoices = () => {
                     </td>
                     <td className="py-4 px-6">
                       <div>
-                        <p className="text-white font-medium">{invoice.userName}</p>
-                        <p className="text-gray-400 text-sm">{invoice.userEmail}</p>
-                        <p className="text-gray-500 text-xs font-mono">
-                          {invoice.walletAddress.slice(0, 8)}...{invoice.walletAddress.slice(-6)}
-                        </p>
+                        <p className="text-white font-medium">{invoice.userName || 'Unknown User'}</p>
+                        <p className="text-gray-400 text-sm">{invoice.userEmail || 'N/A'}</p>
+                        {invoice.walletAddress && (
+                          <p className="text-gray-500 text-xs font-mono">
+                            {invoice.walletAddress.slice(0, 8)}...{invoice.walletAddress.slice(-6)}
+                          </p>
+                        )}
                       </div>
                     </td>
                     <td className="py-4 px-6">
-                      <span className="text-purple-400 font-mono text-sm">#{invoice.tokenId}</span>
+                      <span className="text-purple-400 font-mono text-sm">
+                        {invoice.tokenId && invoice.tokenId !== 'N/A' ? `#${invoice.tokenId}` : invoice.type || 'N/A'}
+                      </span>
                     </td>
                     <td className="py-4 px-6">
                       <span className="text-white font-semibold">
@@ -163,14 +168,14 @@ const BillingInvoices = () => {
                     <td className="py-4 px-6">
                       <span
                         className={`px-3 py-1 rounded-full text-xs font-semibold ${
-                          invoice.status === 'Paid'
+                          invoice.status?.toLowerCase() === 'paid'
                             ? 'bg-green-500/20 text-green-400'
-                            : invoice.status === 'Pending'
+                            : invoice.status?.toLowerCase() === 'pending'
                             ? 'bg-orange-500/20 text-orange-400'
                             : 'bg-red-500/20 text-red-400'
                         }`}
                       >
-                        {invoice.status}
+                        {invoice.status || 'Pending'}
                       </span>
                     </td>
                     <td className="py-4 px-6 text-gray-400 text-sm">

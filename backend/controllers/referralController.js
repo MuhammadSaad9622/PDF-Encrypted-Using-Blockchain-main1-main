@@ -1,4 +1,4 @@
-import User from '../models/User.js';
+import { userService } from '../services/userService.js';
 
 // Validate referral code
 export const validateReferralCode = async (req, res) => {
@@ -10,7 +10,7 @@ export const validateReferralCode = async (req, res) => {
     }
 
     const normalizedCode = code.toUpperCase().trim();
-    const referrer = await User.findOne({ referralCode: normalizedCode });
+    const referrer = await userService.findByReferralCode(normalizedCode);
 
     if (!referrer) {
       return res.status(404).json({ 
@@ -35,19 +35,15 @@ export const getReferralStats = async (req, res) => {
   try {
     const userId = req.userId;
 
-    const user = await User.findById(userId);
+    const user = await userService.findById(userId);
     if (!user) {
       return res.status(404).json({ error: 'User not found' });
     }
 
-    // Count users referred by this user
-    const referredCount = await User.countDocuments({ referredBy: userId });
-
     // Get list of referred users
-    const referredUsers = await User.find({ referredBy: userId })
-      .select('name email createdAt')
-      .sort({ createdAt: -1 })
-      .limit(50);
+    const allReferredUsers = await userService.findByReferredBy(userId);
+    const referredUsers = allReferredUsers.slice(0, 50);
+    const referredCount = allReferredUsers.length;
 
     res.status(200).json({
       success: true,
@@ -55,7 +51,7 @@ export const getReferralStats = async (req, res) => {
       stats: {
         totalReferred: referredCount,
         recentReferrals: referredUsers.map(u => ({
-          id: u._id.toString(),
+          id: u.id,
           name: u.name,
           email: u.email,
           joinedAt: u.createdAt
@@ -76,18 +72,14 @@ export const getReferralHistory = async (req, res) => {
     const limit = parseInt(req.query.limit) || 20;
     const skip = (page - 1) * limit;
 
-    const referredUsers = await User.find({ referredBy: userId })
-      .select('name email createdAt profileComplete')
-      .sort({ createdAt: -1 })
-      .skip(skip)
-      .limit(limit);
-
-    const total = await User.countDocuments({ referredBy: userId });
+    const allReferredUsers = await userService.findByReferredBy(userId);
+    const total = allReferredUsers.length;
+    const referredUsers = allReferredUsers.slice(skip, skip + limit);
 
     res.status(200).json({
       success: true,
       referrals: referredUsers.map(u => ({
-        id: u._id.toString(),
+        id: u.id,
         name: u.name,
         email: u.email,
         profileComplete: u.profileComplete,
