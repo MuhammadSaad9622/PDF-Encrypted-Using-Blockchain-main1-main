@@ -35,7 +35,7 @@ if (!fs.existsSync(tempDir)) {
 const app = express();
 const PORT = process.env.PORT || 5000;
 
-// CORS Configuration
+
 const allowedOrigins = [
   'http://localhost:5001',
   'http://localhost:5173',
