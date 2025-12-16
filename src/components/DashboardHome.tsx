@@ -46,8 +46,8 @@ const DashboardHome = () => {
         const pdfName = nft.pdfName || `PDF #${nft.tokenId}`;
         console.log(`[Dashboard] Processing NFT ${nft.tokenId}, pdfName: ${pdfName}`);
         return {
-          tokenId: nft.tokenId,
-          tokenURI: nft.tokenURI,
+        tokenId: nft.tokenId,
+        tokenURI: nft.tokenURI,
           pdfName: pdfName // Use file name from backend, fallback to token ID
         };
       });
@@ -60,12 +60,12 @@ const DashboardHome = () => {
       });
     } catch (error: any) {
       console.error('Error fetching stats:', error);
-      setStats({
-        totalPDFs: 0,
-        totalNFTs: 0,
-        recentActivity: [],
+          setStats({
+            totalPDFs: 0,
+            totalNFTs: 0,
+            recentActivity: [],
         monthlyStats: []
-      });
+        });
     } finally {
       setLoading(false);
       setRefreshing(false);

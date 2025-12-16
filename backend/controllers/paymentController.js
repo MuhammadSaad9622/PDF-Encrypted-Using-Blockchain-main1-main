@@ -360,15 +360,64 @@ export const processSubscriptionPayment = async (req, res) => {
     };
 
     // In Square SDK v42, the method is 'create', not 'createPayment'
-    const response = await paymentsApi.create(paymentRequest);
+    let response;
+    try {
+      response = await paymentsApi.create(paymentRequest);
+    } catch (squareError) {
+      // Square SDK v42 throws errors, but also may return errors in response
+      console.error('Square payment creation error:', squareError);
+      
+      // Extract error details from Square error
+      // Square SDK v42 can have errors in multiple places
+      const squareErrors = squareError.errors || squareError.body?.errors || squareError.result?.errors || [];
+      const errorCode = squareErrors[0]?.code || 'PAYMENT_FAILED';
+      const errorDetail = squareErrors[0]?.detail || squareErrors[0]?.message || squareError.message || 'Payment processing failed';
+      const errorCategory = squareErrors[0]?.category || 'API_ERROR';
+      
+      // Return structured error information
+      return res.status(squareError.statusCode || 400).json({
+        success: false,
+        error: errorDetail,
+        errorCode: errorCode,
+        errorCategory: errorCategory,
+        errors: squareErrors,
+        payment: squareError.body?.payment || null
+      });
+    }
 
-    // Check for errors
+    // Check for errors in response (Square may return errors even on 200)
     if (response.errors && response.errors.length > 0) {
-      throw new Error(response.errors[0].detail || 'Failed to create payment');
+      const errorCode = response.errors[0]?.code || 'PAYMENT_FAILED';
+      const errorDetail = response.errors[0]?.detail || 'Payment processing failed';
+      const errorCategory = response.errors[0]?.category || 'API_ERROR';
+      
+      return res.status(400).json({
+        success: false,
+        error: errorDetail,
+        errorCode: errorCode,
+        errorCategory: errorCategory,
+        errors: response.errors,
+        payment: response.payment || null
+      });
     }
 
     if (response.payment) {
       const paymentStatus = response.payment.status;
+      
+      // Check if payment failed
+      if (paymentStatus === 'FAILED') {
+        const errorCode = 'PAYMENT_FAILED';
+        const errorDetail = 'Payment was declined by the payment processor';
+        
+        return res.status(400).json({
+          success: false,
+          error: errorDetail,
+          errorCode: errorCode,
+          errorCategory: 'PAYMENT_METHOD_ERROR',
+          errors: response.errors || [],
+          payment: response.payment
+        });
+      }
       
       // Update invoice
       const updateData = {
@@ -418,10 +467,20 @@ export const processSubscriptionPayment = async (req, res) => {
 
   } catch (error) {
     console.error('Error processing subscription payment:', error);
-    const errorMessage = error.response?.errors?.[0]?.detail || error.message || 'Payment processing failed';
-    res.status(500).json({ 
-      error: errorMessage,
-      details: error.response?.errors || error.stack
+    
+    // Try to extract Square error details
+    const squareErrors = error.errors || error.body?.errors || error.response?.errors || [];
+    const errorCode = squareErrors[0]?.code || 'PAYMENT_ERROR';
+    const errorDetail = squareErrors[0]?.detail || error.message || 'Payment processing failed';
+    const errorCategory = squareErrors[0]?.category || 'API_ERROR';
+    
+    res.status(error.statusCode || 500).json({ 
+      success: false,
+      error: errorDetail,
+      errorCode: errorCode,
+      errorCategory: errorCategory,
+      errors: squareErrors,
+      details: error.stack
     });
   }
 };

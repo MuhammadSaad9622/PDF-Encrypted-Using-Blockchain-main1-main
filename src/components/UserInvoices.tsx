@@ -50,6 +50,7 @@ const UserInvoices = () => {
   const [squareLoaded, setSquareLoaded] = useState(false);
   const [paymentForm, setPaymentForm] = useState<any>(null);
   const paymentFormRef = useRef<HTMLDivElement>(null);
+  const [paymentStatus, setPaymentStatus] = useState<'success' | 'failed' | null>(null);
   const { colorScheme } = useTheme();
 
   useEffect(() => {
@@ -293,8 +294,12 @@ const UserInvoices = () => {
           await fetchSubscriptionStatus();
           await fetchInvoices();
           
-          // Show success message
-          alert('Payment successful! Your subscription has been activated.');
+          // Show success modal
+          setPaymentStatus('success');
+          // Auto-close after 3 seconds
+          setTimeout(() => {
+            setPaymentStatus(null);
+          }, 3000);
         } else {
           throw new Error(processResponse?.error || 'Payment processing failed');
         }
@@ -307,7 +312,13 @@ const UserInvoices = () => {
       }
     } catch (error: any) {
       console.error('Payment error:', error);
-      alert(`Payment failed: ${error.message || 'Unknown error occurred'}`);
+      
+      // Show failed status modal
+      setPaymentStatus('failed');
+      // Auto-close after 4 seconds
+      setTimeout(() => {
+        setPaymentStatus(null);
+      }, 4000);
     } finally {
       setPaymentProcessing(false);
     }
@@ -672,12 +683,12 @@ const UserInvoices = () => {
                             title="Download Invoice"
                           >
                             <Download className="h-5 w-5" />
-                          </button>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
               </div>
             </div>
           </div>
@@ -742,13 +753,14 @@ const UserInvoices = () => {
       {/* Enhanced Subscribe Modal */}
       {showSubscribeModal && (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4 animate-in fade-in duration-200">
-          <div className="card-dark max-w-lg w-full bg-gradient-to-br from-gray-900/95 to-gray-900/80 border-2 border-purple-500/30 relative overflow-hidden animate-in zoom-in-95 duration-200">
+          <div className="card-dark max-w-lg w-full bg-gradient-to-br from-gray-900/95 to-gray-900/80 border-2 border-purple-500/30 relative overflow-hidden animate-in zoom-in-95 duration-200 my-8 max-h-[90vh] flex flex-col">
             {/* Decorative Elements */}
             <div className="absolute top-0 right-0 w-32 h-32 bg-gradient-to-br from-purple-500/10 to-transparent rounded-full blur-2xl"></div>
             <div className="absolute bottom-0 left-0 w-24 h-24 bg-gradient-to-tr from-pink-500/10 to-transparent rounded-full blur-2xl"></div>
             
-            <div className="relative z-10">
-              <div className="flex items-center justify-between mb-6">
+            <div className="relative z-10 flex flex-col flex-1 min-h-0">
+              {/* Header - Fixed */}
+              <div className="flex items-center justify-between mb-6 flex-shrink-0 px-6 pt-6">
                 <h3 className="text-2xl font-bold text-white flex items-center gap-2">
                   <Sparkles className="h-6 w-6 text-purple-400" />
                   Subscribe to Platform
@@ -761,7 +773,8 @@ const UserInvoices = () => {
                 </button>
               </div>
               
-              <div className="space-y-6">
+              {/* Scrollable Content */}
+              <div className="space-y-6 px-6 pb-6 overflow-y-auto flex-1">
                 {/* Premium Plan Card */}
                 <div className={`p-6 rounded-xl bg-gradient-to-br ${getGradientClasses(colorScheme, 'bg')} bg-opacity-10 border-2 border-purple-500/30 relative overflow-hidden`}>
                   <div className="absolute top-0 right-0 w-20 h-20 bg-white/5 rounded-full blur-xl"></div>
@@ -853,6 +866,70 @@ const UserInvoices = () => {
                   </button>
                 </div>
               </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Payment Status Modal */}
+      {paymentStatus && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4 animate-in fade-in duration-300">
+          <div className={`card-dark max-w-md w-full bg-gradient-to-br from-gray-900/95 to-gray-900/80 border-2 ${
+            paymentStatus === 'success' 
+              ? 'border-green-500/30' 
+              : 'border-red-500/30'
+          } relative overflow-hidden animate-in zoom-in-95 duration-300`}>
+            {/* Decorative Elements */}
+            {paymentStatus === 'success' ? (
+              <>
+                <div className="absolute top-0 right-0 w-32 h-32 bg-gradient-to-br from-green-500/10 to-transparent rounded-full blur-2xl animate-pulse"></div>
+                <div className="absolute bottom-0 left-0 w-24 h-24 bg-gradient-to-tr from-emerald-500/10 to-transparent rounded-full blur-2xl animate-pulse"></div>
+              </>
+            ) : (
+              <>
+                <div className="absolute top-0 right-0 w-32 h-32 bg-gradient-to-br from-red-500/10 to-transparent rounded-full blur-2xl animate-pulse"></div>
+                <div className="absolute bottom-0 left-0 w-24 h-24 bg-gradient-to-tr from-orange-500/10 to-transparent rounded-full blur-2xl animate-pulse"></div>
+              </>
+            )}
+            
+            <div className="relative z-10 p-8 text-center">
+              {/* Icon with animation */}
+              <div className="mb-6 flex justify-center">
+                {paymentStatus === 'success' ? (
+                  <div className="relative">
+                    <div className="absolute inset-0 bg-green-500/20 rounded-full blur-xl animate-ping"></div>
+                    <div className="relative w-20 h-20 rounded-full bg-green-500/20 border-2 border-green-500/30 flex items-center justify-center animate-in zoom-in-95 duration-300">
+                      <CheckCircle className="h-12 w-12 text-green-400 animate-in zoom-in duration-500" />
+                    </div>
+                  </div>
+                ) : (
+                  <div className="relative">
+                    <div className="absolute inset-0 bg-red-500/20 rounded-full blur-xl animate-ping"></div>
+                    <div className="relative w-20 h-20 rounded-full bg-red-500/20 border-2 border-red-500/30 flex items-center justify-center animate-in zoom-in-95 duration-300">
+                      <X className="h-12 w-12 text-red-400 animate-in zoom-in duration-500" />
+                    </div>
+                  </div>
+                )}
+              </div>
+              
+              {/* Status Text */}
+              <h3 className={`text-3xl font-bold mb-3 ${
+                paymentStatus === 'success' ? 'text-green-400' : 'text-red-400'
+              } animate-in fade-in slide-in-from-bottom-4 duration-500`}>
+                {paymentStatus === 'success' ? 'Transaction Successful!' : 'Transaction Failed'}
+              </h3>
+              
+              {paymentStatus === 'success' && (
+                <p className="text-gray-300 text-sm animate-in fade-in slide-in-from-bottom-4 duration-700 delay-150">
+                  Your subscription has been activated successfully.
+                </p>
+              )}
+              
+              {paymentStatus === 'failed' && (
+                <p className="text-gray-300 text-sm animate-in fade-in slide-in-from-bottom-4 duration-700 delay-150">
+                  Please try again or use a different payment method.
+                </p>
+              )}
             </div>
           </div>
         </div>

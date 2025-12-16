@@ -35,8 +35,18 @@ export const apiCall = async (endpoint: string, options: RequestInit = {}) => {
   });
   
   if (!response.ok) {
-    const error = await response.json().catch(() => ({ error: 'An error occurred' }));
-    throw new Error(error.error || 'API request failed');
+    const errorData = await response.json().catch(() => ({ error: 'An error occurred' }));
+    // Create an error object that preserves all error details
+    const apiError: any = new Error(errorData.error || errorData.message || 'API request failed');
+    // Attach additional error details for structured error handling
+    apiError.errorCode = errorData.errorCode;
+    apiError.errorCategory = errorData.errorCategory;
+    apiError.errors = errorData.errors;
+    apiError.success = errorData.success;
+    apiError.details = errorData.details;
+    // Preserve the original error message in error property
+    apiError.error = errorData.error || errorData.message;
+    throw apiError;
   }
   
   return response.json();
