@@ -51,6 +51,8 @@ const UserInvoices = () => {
   const [paymentForm, setPaymentForm] = useState<any>(null);
   const paymentFormRef = useRef<HTMLDivElement>(null);
   const [paymentStatus, setPaymentStatus] = useState<'success' | 'failed' | null>(null);
+  const [cancelling, setCancelling] = useState(false);
+  const [showCancelSubscriptionModal, setShowCancelSubscriptionModal] = useState(false);
   const { colorScheme } = useTheme();
 
   useEffect(() => {
@@ -254,6 +256,24 @@ const UserInvoices = () => {
     setShowSubscribeModal(true);
   };
 
+  const handleCancelSubscription = async () => {
+    if (!subscription || subscription.status !== 'active') return;
+
+    try {
+      setCancelling(true);
+      await paymentApi.cancelSubscription();
+      await fetchSubscriptionStatus();
+      await fetchInvoices();
+      setShowCancelSubscriptionModal(false);
+      alert('Your subscription has been cancelled.');
+    } catch (error: any) {
+      console.error('Error cancelling subscription:', error);
+      alert(error?.message || 'Failed to cancel subscription. Please try again.');
+    } finally {
+      setCancelling(false);
+    }
+  };
+
   const handlePayment = async () => {
     if (!paymentForm || !squareConfig) {
       alert('Payment form is not ready. Please wait a moment and try again.');
@@ -394,7 +414,7 @@ const UserInvoices = () => {
                 <div className="flex-1">
                   <div className="flex items-center gap-3 mb-2">
                     <h3 className="text-2xl font-bold text-white">Subscription Status</h3>
-                    {subscription.status === 'active' && (
+              {subscription.status === 'active' && (
                       <span className="px-3 py-1 rounded-full text-xs font-semibold bg-green-500/20 text-green-400 border border-green-500/30 flex items-center gap-1">
                         <Sparkles className="h-3 w-3" />
                         Active
@@ -416,6 +436,20 @@ const UserInvoices = () => {
                   </p>
                 </div>
               </div>
+
+              {subscription.status === 'active' && (
+                <div className="mt-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+                  <p className="text-xs sm:text-sm text-gray-400 max-w-md">
+                    You can cancel your subscription at any time. You will retain access until the end of the current billing period.
+                  </p>
+                  <button
+                    onClick={() => setShowCancelSubscriptionModal(true)}
+                    className="px-4 py-2 rounded-lg text-xs sm:text-sm font-medium border border-red-500/40 text-red-400 hover:bg-red-500/10 transition-all"
+                  >
+                    Cancel Subscription
+                  </button>
+                </div>
+              )}
               {subscription.status !== 'active' && (
                 <button
                   onClick={handleSubscribe}
@@ -863,6 +897,60 @@ const UserInvoices = () => {
                         <Sparkles className="h-5 w-5" />
                       </>
                     )}
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Cancel Subscription Modal */}
+      {showCancelSubscriptionModal && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4 animate-in fade-in duration-200">
+          <div className="card-dark max-w-md w-full bg-gradient-to-br from-gray-900/95 to-gray-900/80 border-2 border-red-500/30 relative overflow-hidden animate-in zoom-in-95 duration-200">
+            {/* Decorative Elements */}
+            <div className="absolute top-0 right-0 w-32 h-32 bg-gradient-to-br from-red-500/10 to-transparent rounded-full blur-2xl"></div>
+            <div className="absolute bottom-0 left-0 w-24 h-24 bg-gradient-to-tr from-orange-500/10 to-transparent rounded-full blur-2xl"></div>
+            
+            <div className="relative z-10 p-6">
+              <div className="flex items-center space-x-3 mb-4">
+                <div className="p-2 rounded-lg bg-red-500/20 border border-red-500/30">
+                  <AlertCircle className="h-6 w-6 text-red-400" />
+                </div>
+                <h3 className="text-xl font-bold text-white">Cancel Subscription</h3>
+              </div>
+              <div className="space-y-4">
+                <div className="bg-red-500/10 border border-red-500/30 rounded-lg p-4">
+                  <p className="text-red-300 text-sm mb-2 font-semibold">Warning</p>
+                  <p className="text-gray-300 text-sm">
+                    Are you sure you want to cancel your subscription? You will lose access when the current period ends.
+                  </p>
+                </div>
+                <div className="flex space-x-3 pt-2">
+                  <button
+                    onClick={handleCancelSubscription}
+                    disabled={cancelling}
+                    className="btn-primary flex-1 bg-red-600 hover:bg-red-700 disabled:opacity-50 flex items-center justify-center space-x-2"
+                  >
+                    {cancelling ? (
+                      <>
+                        <div className="animate-spin rounded-full h-4 w-4 border-2 border-white border-t-transparent"></div>
+                        <span>Cancelling...</span>
+                      </>
+                    ) : (
+                      <>
+                        <X className="h-4 w-4" />
+                        <span>Yes, Cancel Subscription</span>
+                      </>
+                    )}
+                  </button>
+                  <button
+                    onClick={() => setShowCancelSubscriptionModal(false)}
+                    disabled={cancelling}
+                    className="btn-secondary flex-1 disabled:opacity-50"
+                  >
+                    No, Keep Active
                   </button>
                 </div>
               </div>

@@ -577,6 +577,16 @@ export const adminApi = {
     return response.json();
   },
 
+  cancelUserSubscription: async (userId: string) => {
+    const token = localStorage.getItem('adminToken');
+    return apiCall(`/api/admin/users/${userId}/subscription/cancel`, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${token}`,
+      },
+    });
+  },
+
   // Access code management
   createAccessCode: async (data: {
     code: string;
@@ -666,8 +676,21 @@ export const paymentApi = {
     return apiCall('/api/payments/subscription/status');
   },
 
+  cancelSubscription: async () => {
+    return apiCall('/api/payments/subscription/cancel', {
+      method: 'POST',
+    });
+  },
+
   getSquareConfig: async () => {
     return apiCall('/api/payments/square/config');
+  },
+
+  verifyCard: async (sourceId: string) => {
+    return apiCall('/api/payments/square/verify-card', {
+      method: 'POST',
+      body: JSON.stringify({ sourceId }),
+    });
   },
 };
 

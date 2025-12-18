@@ -3,6 +3,7 @@ import { accessCodeService } from '../services/accessCodeService.js';
 import jwt from 'jsonwebtoken';
 import { ethers } from 'ethers';
 import { contractAddress } from '../utils/wallet.js';
+import crypto from 'crypto';
 
 const JWT_SECRET = process.env.JWT_SECRET || 'your-secret-key-change-in-production';
 
@@ -33,7 +34,8 @@ export const signup = async (req, res) => {
       zipCode,
       agreedToTerms,
       agreedToPrivacy,
-      agreedToEarlyAdopter
+      agreedToEarlyAdopter,
+      paymentToken // Payment token from Square (if access code requires payment)
     } = req.body;
 
     // Validate required fields
@@ -119,12 +121,19 @@ export const signup = async (req, res) => {
     let subscriptionStartDate = null;
     let subscriptionEndDate = null;
     
+    // If access code has subscription plan, payment is required upfront
     if (accessCodeDoc.subscriptionPlan) {
+      if (!paymentToken) {
+        return res.status(400).json({ 
+          error: 'Payment information is required for access codes with subscription plans' 
+        });
+      }
+
       subscriptionPlan = accessCodeDoc.subscriptionPlan;
       subscriptionStatus = 'active';
       subscriptionStartDate = now;
       
-      // Calculate end date based on plan
+      // Calculate end date based on plan (free period duration)
       const duration = accessCodeDoc.subscriptionDuration || 
         (subscriptionPlan === 'monthly' ? 30 : 
          subscriptionPlan === 'yearly' ? 365 : 
@@ -170,6 +179,33 @@ export const signup = async (req, res) => {
 
     // Increment access code usage
     await accessCodeService.incrementUsage(accessCodeDoc.id);
+
+    // If subscription was activated and payment token was provided, create invoice
+    if (subscriptionPlan && paymentToken && subscriptionStatus === 'active') {
+      try {
+        const { invoiceService } = await import('../services/invoiceService.js');
+        
+        // Create a $0 invoice for the free period subscription
+        const invoiceId = `INV-${Date.now()}-${crypto.randomBytes(4).toString('hex')}`;
+        await invoiceService.create({
+          invoiceId,
+          invoiceNumber: invoiceId,
+          userId: user.id,
+          amount: 0, // Free period - $0 charge
+          currency: 'USD',
+          subscriptionPlan: subscriptionPlan,
+          status: 'Paid', // Mark as paid since it's a free period
+          paymentMethod: 'square',
+          description: `Subscription activation via access code - ${subscriptionPlan} plan${subscriptionDuration ? ` (${subscriptionDuration} days free)` : ''}`,
+          subscriptionStartDate: subscriptionStartDate,
+          subscriptionEndDate: subscriptionEndDate,
+          transactionHash: `FREE-${paymentToken.substring(0, 8)}` // Store partial token reference for tracking
+        });
+      } catch (invoiceError) {
+        console.error('Error creating subscription invoice:', invoiceError);
+        // Don't fail signup if invoice creation fails, but log it
+      }
+    }
 
     // Generate token
     const token = generateToken(user.id, user.role);

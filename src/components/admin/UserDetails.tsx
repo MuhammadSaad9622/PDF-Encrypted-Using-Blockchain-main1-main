@@ -64,6 +64,8 @@ const UserDetails = ({ userId, onBack }: UserDetailsProps) => {
   const [suspendReason, setSuspendReason] = useState('');
   const [showSuspendModal, setShowSuspendModal] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [cancellingSubscription, setCancellingSubscription] = useState(false);
+  const [showCancelSubscriptionModal, setShowCancelSubscriptionModal] = useState(false);
 
   useEffect(() => {
     if (userId) {
@@ -270,6 +272,24 @@ const UserDetails = ({ userId, onBack }: UserDetailsProps) => {
     }
   };
 
+  const handleAdminCancelSubscription = async () => {
+    if (!userDetails || userDetails.subscriptionStatus !== 'active') return;
+
+    try {
+      setCancellingSubscription(true);
+      await adminApi.cancelUserSubscription(userDetails.id);
+      await fetchUserDetails();
+      setShowCancelSubscriptionModal(false);
+      // Show success message (you can replace with a toast notification if preferred)
+      alert('User subscription cancelled successfully.');
+    } catch (error: any) {
+      console.error('Failed to cancel user subscription:', error);
+      alert(error?.message || 'Failed to cancel user subscription');
+    } finally {
+      setCancellingSubscription(false);
+    }
+  };
+
   // ALWAYS render something visible - never return null or empty
   if (loading) {
     return (
@@ -419,7 +439,7 @@ const UserDetails = ({ userId, onBack }: UserDetailsProps) => {
         )}
 
         {/* Admin Actions */}
-        <div className="flex items-center space-x-3 pt-4 border-t border-gray-800">
+        <div className="flex flex-wrap items-center gap-3 pt-4 border-t border-gray-800">
           {!userDetails.isSuspended && (
             <button
               onClick={() => setShowSuspendModal(true)}
@@ -427,6 +447,16 @@ const UserDetails = ({ userId, onBack }: UserDetailsProps) => {
             >
               <Shield className="h-4 w-4" />
               <span>Suspend User</span>
+            </button>
+          )}
+
+          {userDetails.subscriptionStatus === 'active' && (
+            <button
+              onClick={() => setShowCancelSubscriptionModal(true)}
+              className="btn-secondary flex items-center space-x-2 text-yellow-400 hover:bg-yellow-500/20"
+            >
+              <XCircle className="h-4 w-4" />
+              <span>Cancel Subscription</span>
             </button>
           )}
         </div>
@@ -738,6 +768,54 @@ const UserDetails = ({ userId, onBack }: UserDetailsProps) => {
                   className="btn-secondary flex-1"
                 >
                   Cancel
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Cancel Subscription Modal */}
+      {showCancelSubscriptionModal && (
+        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+          <div className="card-dark max-w-md w-full">
+            <div className="flex items-center space-x-3 mb-4">
+              <div className="p-2 rounded-lg bg-yellow-500/20 border border-yellow-500/30">
+                <AlertTriangle className="h-6 w-6 text-yellow-400" />
+              </div>
+              <h3 className="text-xl font-bold text-white">Cancel Subscription</h3>
+            </div>
+            <div className="space-y-4">
+              <div className="bg-yellow-500/10 border border-yellow-500/30 rounded-lg p-4">
+                <p className="text-yellow-300 text-sm mb-2 font-semibold">Warning</p>
+                <p className="text-gray-300 text-sm">
+                  Are you sure you want to cancel this user's subscription? They will lose access when the current period ends.
+                </p>
+              </div>
+              <div className="flex space-x-3 pt-4">
+                <button
+                  onClick={handleAdminCancelSubscription}
+                  disabled={cancellingSubscription}
+                  className="btn-primary flex-1 bg-yellow-600 hover:bg-yellow-700 disabled:opacity-50 flex items-center justify-center space-x-2"
+                >
+                  {cancellingSubscription ? (
+                    <>
+                      <div className="animate-spin rounded-full h-4 w-4 border-2 border-white border-t-transparent"></div>
+                      <span>Cancelling...</span>
+                    </>
+                  ) : (
+                    <>
+                      <CheckCircle className="h-4 w-4" />
+                      <span>Yes, Cancel Subscription</span>
+                    </>
+                  )}
+                </button>
+                <button
+                  onClick={() => setShowCancelSubscriptionModal(false)}
+                  disabled={cancellingSubscription}
+                  className="btn-secondary flex-1 disabled:opacity-50"
+                >
+                  No, Keep Active
                 </button>
               </div>
             </div>

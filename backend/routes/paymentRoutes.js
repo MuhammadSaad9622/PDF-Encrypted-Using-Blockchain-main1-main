@@ -5,7 +5,9 @@ import {
   handleSquareWebhook,
   getSubscriptionStatus,
   getSquareConfig,
-  getSquareLocations
+  cancelSubscription,
+  getSquareLocations,
+  verifyCard
 } from '../controllers/paymentController.js';
 import { authenticate } from '../middleware/auth.js';
 
@@ -24,7 +26,9 @@ router.get('/square/locations', getSquareLocations);
 // Authenticated payment routes
 router.post('/square/create-subscription', authenticate, createSubscriptionPayment);
 router.post('/square/process-subscription', authenticate, processSubscriptionPayment);
+router.post('/square/verify-card', verifyCard); // No auth needed - used during signup
 router.get('/subscription/status', authenticate, getSubscriptionStatus);
+router.post('/subscription/cancel', authenticate, cancelSubscription);
 
 export default router;
 

@@ -11,7 +11,8 @@ import {
   getBillingInvoices,
   suspendUser,
   unsuspendUser,
-  updateUserNotes
+  updateUserNotes,
+  cancelUserSubscription
 } from '../controllers/adminController.js';
 import {
   createAccessCode,
@@ -45,6 +46,9 @@ router.put('/users/:userId/notes', updateUserNotes);
 
 // Billing and invoices
 router.get('/billing/invoices', getBillingInvoices);
+
+// Subscription management
+router.post('/users/:userId/subscription/cancel', cancelUserSubscription);
 
 // Access code management
 router.post('/access-codes', createAccessCode);

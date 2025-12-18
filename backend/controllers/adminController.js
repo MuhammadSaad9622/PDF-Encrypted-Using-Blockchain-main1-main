@@ -411,6 +411,64 @@ export const getBillingInvoices = async (req, res) => {
   }
 };
 
+// Cancel a user's active subscription (admin action)
+export const cancelUserSubscription = async (req, res) => {
+  try {
+    const { userId } = req.params;
+
+    const user = await userService.findById(userId);
+    if (!user) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+
+    if (user.role === 'admin') {
+      return res.status(403).json({ error: 'Cannot cancel subscription for admin users' });
+    }
+
+    if (user.subscriptionStatus !== 'active') {
+      return res.status(400).json({ error: 'User does not have an active subscription to cancel' });
+    }
+
+    const { invoiceService } = await import('../services/invoiceService.js');
+
+    // Find latest paid invoice for this user
+    const invoices = await invoiceService.find(
+      { userId, status: 'Paid' },
+      { sort: { createdAt: -1 }, limit: 1 }
+    );
+
+    const latestInvoice = invoices && invoices.length > 0 ? invoices[0] : null;
+    const now = new Date();
+
+    if (latestInvoice) {
+      await invoiceService.update(latestInvoice.id, {
+        status: 'Cancelled',
+        subscriptionEndDate: now
+      });
+    }
+
+    const updatedUser = await userService.update(userId, {
+      subscriptionStatus: 'inactive',
+      subscriptionEndDate: now
+    });
+
+    res.status(200).json({
+      success: true,
+      message: 'User subscription cancelled successfully',
+      user: {
+        id: updatedUser.id,
+        email: updatedUser.email,
+        name: updatedUser.name,
+        subscriptionStatus: updatedUser.subscriptionStatus,
+        subscriptionEndDate: updatedUser.subscriptionEndDate
+      }
+    });
+  } catch (error) {
+    console.error('Error cancelling user subscription:', error);
+    res.status(500).json({ error: error.message || 'Error cancelling user subscription' });
+  }
+};
+
 // Update user
 export const updateUser = async (req, res) => {
   try {

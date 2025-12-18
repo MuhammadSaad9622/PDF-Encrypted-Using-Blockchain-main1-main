@@ -28,12 +28,24 @@ export const validateAccessCode = async (req, res) => {
       });
     }
 
+    const requiresPayment = !!accessCode.subscriptionPlan;
+    console.log('Access code validation:', {
+      code: accessCode.code,
+      subscriptionPlan: accessCode.subscriptionPlan,
+      subscriptionDuration: accessCode.subscriptionDuration,
+      requiresPayment: requiresPayment
+    });
+
     res.status(200).json({
       valid: true,
       code: accessCode.code,
       remainingUses: accessCode.maxUses !== null 
         ? accessCode.maxUses - accessCode.usedCount 
-        : null
+        : null,
+      // Include subscription info so frontend knows if payment is required
+      subscriptionPlan: accessCode.subscriptionPlan || null,
+      subscriptionDuration: accessCode.subscriptionDuration || null,
+      requiresPayment: requiresPayment // If there's a plan, payment is required upfront
     });
   } catch (error) {
     console.error('Validate access code error:', error);
