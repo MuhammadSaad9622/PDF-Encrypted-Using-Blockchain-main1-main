@@ -1,14 +1,9 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect } from 'react';
 import { Receipt, Download, CheckCircle, Clock, DollarSign, ChevronLeft, ChevronRight, FileText, CreditCard, AlertCircle, HardDrive, Zap, X, Sparkles, Shield, Calendar, TrendingUp } from 'lucide-react';
 import { authApi, paymentApi } from '../utils/api';
 import { useTheme, getGradientClasses } from '../utils/theme';
-
-// Declare Square types
-declare global {
-  interface Window {
-    Square?: any;
-  }
-}
+import { loadStripe, Stripe, StripeElements } from '@stripe/stripe-js';
+import { Elements, CardElement, useStripe, useElements } from '@stripe/react-stripe-js';
 
 interface Invoice {
   id: string;
@@ -36,6 +31,74 @@ interface SubscriptionStatus {
   };
 }
 
+// Payment Form Component using Stripe Elements
+interface PaymentFormComponentProps {
+  onPayment: (stripe: Stripe | null, elements: StripeElements | null) => Promise<void>;
+  paymentProcessing: boolean;
+}
+
+const PaymentFormComponent: React.FC<PaymentFormComponentProps> = ({ onPayment, paymentProcessing }) => {
+  const stripe = useStripe();
+  const elements = useElements();
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!stripe || !elements) {
+      return;
+    }
+    await onPayment(stripe, elements);
+  };
+
+  const cardElementOptions = {
+    style: {
+      base: {
+        fontSize: '16px',
+        color: '#e5e7eb',
+        '::placeholder': {
+          color: '#6b7280',
+        },
+        fontFamily: 'system-ui, -apple-system, sans-serif',
+      },
+      invalid: {
+        color: '#ef4444',
+        iconColor: '#ef4444',
+      },
+    },
+    hidePostalCode: false,
+  };
+
+  return (
+    <form onSubmit={handleSubmit}>
+      <div className="bg-gray-800/50 rounded-xl p-4 border border-gray-700/50">
+        <label className="block text-sm font-medium text-gray-300 mb-3">
+          Card Information
+        </label>
+        <div className="bg-gray-900/50 border border-gray-700/50 rounded-lg p-4">
+          <CardElement options={cardElementOptions} />
+        </div>
+      </div>
+      
+      <button
+        type="submit"
+        disabled={!stripe || paymentProcessing}
+        className="w-full mt-4 px-6 py-3 rounded-xl font-semibold bg-gradient-to-r from-purple-500 to-pink-500 text-white hover:scale-105 active:scale-95 transition-all duration-200 shadow-lg shadow-purple-500/25 flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+      >
+        {paymentProcessing ? (
+          <>
+            <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>
+            Processing Payment...
+          </>
+        ) : (
+          <>
+            <CreditCard className="h-5 w-5" />
+            Subscribe Now - $10/month
+          </>
+        )}
+      </button>
+    </form>
+  );
+};
+
 const UserInvoices = () => {
   const [invoices, setInvoices] = useState<Invoice[]>([]);
   const [loading, setLoading] = useState(true);
@@ -46,10 +109,8 @@ const UserInvoices = () => {
   const [subscriptionLoading, setSubscriptionLoading] = useState(true);
   const [showSubscribeModal, setShowSubscribeModal] = useState(false);
   const [paymentProcessing, setPaymentProcessing] = useState(false);
-  const [squareConfig, setSquareConfig] = useState<any>(null);
-  const [squareLoaded, setSquareLoaded] = useState(false);
-  const [paymentForm, setPaymentForm] = useState<any>(null);
-  const paymentFormRef = useRef<HTMLDivElement>(null);
+  const [stripePromise, setStripePromise] = useState<Promise<Stripe | null> | null>(null);
+  const [stripeLoaded, setStripeLoaded] = useState(false);
   const [paymentStatus, setPaymentStatus] = useState<'success' | 'failed' | null>(null);
   const [cancelling, setCancelling] = useState(false);
   const [showCancelSubscriptionModal, setShowCancelSubscriptionModal] = useState(false);
@@ -58,147 +119,19 @@ const UserInvoices = () => {
   useEffect(() => {
     fetchInvoices();
     fetchSubscriptionStatus();
-    loadSquareConfig();
+    loadStripeConfig();
   }, [page]);
 
-  useEffect(() => {
-    // Initialize Square when config is loaded and modal is shown
-    if (showSubscribeModal && squareConfig && squareLoaded && paymentFormRef.current && !paymentForm) {
-      // Small delay to ensure DOM is ready
-      const timer = setTimeout(() => {
-        initializeSquarePayment();
-      }, 100);
-      return () => clearTimeout(timer);
-    }
-    
-    // Cleanup when modal closes
-    if (!showSubscribeModal && paymentForm) {
-      // Square forms clean up automatically when detached
-      setPaymentForm(null);
-    }
-  }, [showSubscribeModal, squareConfig, squareLoaded, paymentForm]);
-
-  const loadSquareConfig = async () => {
+  const loadStripeConfig = async () => {
     try {
-      const response = await paymentApi.getSquareConfig();
-      if (response?.success && response?.config) {
-        setSquareConfig(response.config);
-        // Load Square SDK dynamically based on environment
-        loadSquareSDK(response.config.sdkUrl);
+      const response = await paymentApi.getStripeConfig();
+      if (response?.success && response?.config?.publishableKey) {
+        const stripe = loadStripe(response.config.publishableKey);
+        setStripePromise(stripe);
+        setStripeLoaded(true);
       }
     } catch (error: any) {
-      console.error('Error loading Square config:', error);
-    }
-  };
-
-  const loadSquareSDK = (sdkUrl: string) => {
-    // Check if Square is already loaded
-    if (window.Square && window.Square.payments) {
-      console.log('Square SDK already loaded');
-      setSquareLoaded(true);
-      return;
-    }
-
-    // Check if script already exists
-    const existingScript = document.querySelector(`script[src="${sdkUrl}"]`);
-    if (existingScript) {
-      // Wait a bit for it to load
-      const checkInterval = setInterval(() => {
-        if (window.Square && window.Square.payments) {
-          setSquareLoaded(true);
-          clearInterval(checkInterval);
-        }
-      }, 100);
-      
-      // Timeout after 5 seconds
-      setTimeout(() => {
-        clearInterval(checkInterval);
-        if (!window.Square || !window.Square.payments) {
-          console.error('Square SDK script exists but Square object not available');
-        }
-      }, 5000);
-      return;
-    }
-
-    // Load Square SDK
-    const script = document.createElement('script');
-    script.src = sdkUrl;
-    script.type = 'text/javascript';
-    script.onload = () => {
-      // Wait a moment for Square to initialize
-      setTimeout(() => {
-        if (window.Square && window.Square.payments) {
-          console.log('Square SDK loaded successfully');
-          setSquareLoaded(true);
-        } else {
-          console.error('Square SDK script loaded but Square.payments not available');
-          console.log('Available Square properties:', window.Square ? Object.keys(window.Square) : 'Square not found');
-        }
-      }, 100);
-    };
-    script.onerror = () => {
-      console.error('Failed to load Square SDK from:', sdkUrl);
-    };
-    document.head.appendChild(script);
-  };
-
-  const initializeSquarePayment = async () => {
-    if (!window.Square) {
-      console.error('Square SDK not loaded');
-      return;
-    }
-
-    if (!window.Square.payments) {
-      console.error('Square.payments is not available. Square object:', window.Square);
-      return;
-    }
-
-    if (!squareConfig || !squareConfig.applicationId || !squareConfig.locationId) {
-      console.error('Square config missing:', squareConfig);
-      return;
-    }
-
-    if (!paymentFormRef.current) {
-      console.error('Payment form ref not available');
-      return;
-    }
-
-    try {
-      console.log('Initializing Square payments with:', {
-        applicationId: squareConfig.applicationId,
-        locationId: squareConfig.locationId
-      });
-
-      // Initialize Square payments
-      const payments = window.Square.payments(squareConfig.applicationId, squareConfig.locationId);
-      
-      if (!payments || typeof payments.card !== 'function') {
-        console.error('payments.card is not a function. Payments object:', payments);
-        return;
-      }
-
-      // Create card payment method (this is async)
-      const card = await payments.card();
-      
-      if (!card || typeof card.attach !== 'function') {
-        console.error('card.attach is not a function. Card object:', card);
-        return;
-      }
-      
-      // Attach card to DOM element (this is also async)
-      await card.attach(paymentFormRef.current);
-      
-      setPaymentForm(card);
-      console.log('✅ Square payment form initialized successfully');
-    } catch (error: any) {
-      console.error('Error initializing Square payment:', error);
-      console.error('Error details:', {
-        message: error?.message,
-        stack: error?.stack,
-        squareConfig: squareConfig ? 'present' : 'missing',
-        hasSquare: !!window.Square,
-        hasPayments: !!(window.Square && window.Square.payments)
-      });
+      console.error('Error loading Stripe config:', error);
     }
   };
 
@@ -274,67 +207,91 @@ const UserInvoices = () => {
     }
   };
 
-  const handlePayment = async () => {
-    if (!paymentForm || !squareConfig) {
-      alert('Payment form is not ready. Please wait a moment and try again.');
+  // This will be called from PaymentFormComponent
+  const handlePayment = async (stripe: Stripe | null, elements: StripeElements | null) => {
+    if (!stripe || !elements) {
+      alert('Payment system is not ready. Please wait a moment and try again.');
       return;
     }
 
     try {
       setPaymentProcessing(true);
 
-      // Step 1: Create subscription payment (creates invoice and order)
-      const createResponse = await paymentApi.createSubscriptionPayment();
-      
-      if (!createResponse?.success || !createResponse?.orderId || !createResponse?.invoiceId) {
-        throw new Error(createResponse?.error || 'Failed to create payment order');
+      // Step 1: Get card element
+      const cardElement = elements.getElement(CardElement);
+      if (!cardElement) {
+        throw new Error('Card information is required');
       }
 
-      const { orderId, invoiceId, paymentRequest } = createResponse;
+      // Step 2: Create payment method
+      const { error: pmError, paymentMethod } = await stripe.createPaymentMethod({
+        type: 'card',
+        card: cardElement,
+      });
 
-      // Step 2: Tokenize the card
-      const tokenResult = await paymentForm.tokenize();
+      if (pmError || !paymentMethod) {
+        throw new Error(pmError?.message || 'Failed to create payment method');
+      }
+
+      // Step 3: Create subscription payment (creates invoice and payment intent)
+      const createResponse = await paymentApi.createSubscriptionPayment();
       
-      if (tokenResult.status === 'OK') {
-        // Step 3: Process the payment with the token
-        // Generate idempotency key
-        const idempotencyKey = `${Date.now()}-${Math.random().toString(36).substring(2, 15)}`;
-        
-        const processResponse = await paymentApi.processSubscriptionPayment({
-          sourceId: tokenResult.token,
-          orderId: orderId,
-          invoiceId: invoiceId,
-          idempotencyKey: idempotencyKey
-        });
+      if (!createResponse?.success || !createResponse?.paymentIntentId || !createResponse?.invoiceId) {
+        throw new Error(createResponse?.error || 'Failed to create payment intent');
+      }
 
-        if (processResponse?.success) {
-          // Payment successful
-          setShowSubscribeModal(false);
-          // Refresh subscription status and invoices
-          await fetchSubscriptionStatus();
-          await fetchInvoices();
-          
-          // Show success modal
-          setPaymentStatus('success');
-          // Auto-close after 3 seconds
-          setTimeout(() => {
-            setPaymentStatus(null);
-          }, 3000);
-        } else {
-          throw new Error(processResponse?.error || 'Payment processing failed');
+      const { paymentIntentId, invoiceId } = createResponse;
+
+      // Step 4: Process the payment with the payment method
+      const processResponse = await paymentApi.processSubscriptionPayment({
+        paymentIntentId: paymentIntentId,
+        paymentMethodId: paymentMethod.id,
+        invoiceId: invoiceId
+      });
+
+      if (processResponse?.success) {
+        // Payment successful
+        setShowSubscribeModal(false);
+        // Refresh subscription status and invoices
+        await fetchSubscriptionStatus();
+        await fetchInvoices();
+        
+        // Show success modal
+        setPaymentStatus('success');
+        // Auto-close after 3 seconds
+        setTimeout(() => {
+          setPaymentStatus(null);
+        }, 3000);
+      } else if (processResponse?.requiresAction) {
+        // Payment requires additional action (3D Secure)
+        const { error: confirmError } = await stripe.confirmCardPayment(
+          processResponse.clientSecret!,
+          {
+            payment_method: paymentMethod.id
+          }
+        );
+
+        if (confirmError) {
+          throw new Error(confirmError.message || 'Payment authentication failed');
         }
+
+        // Payment successful after authentication
+        setShowSubscribeModal(false);
+        await fetchSubscriptionStatus();
+        await fetchInvoices();
+        setPaymentStatus('success');
+        setTimeout(() => {
+          setPaymentStatus(null);
+        }, 3000);
       } else {
-        let errorMessage = 'Failed to tokenize card';
-        if (tokenResult.errors && tokenResult.errors.length > 0) {
-          errorMessage = tokenResult.errors.map((e: any) => e.detail).join(', ');
-        }
-        throw new Error(errorMessage);
+        throw new Error(processResponse?.error || 'Payment processing failed');
       }
     } catch (error: any) {
       console.error('Payment error:', error);
       
       // Show failed status modal
       setPaymentStatus('failed');
+      alert(error.message || 'Payment failed. Please try again.');
       // Auto-close after 4 seconds
       setTimeout(() => {
         setPaymentStatus(null);
@@ -852,52 +809,30 @@ const UserInvoices = () => {
                       <div>
                         <p className="text-sm font-semibold text-blue-300 mb-1">Secure Payment</p>
                         <p className="text-sm text-blue-400/80">
-                          Your payment is processed securely through Square. Card details are encrypted and never stored on our servers.
+                          Your payment is processed securely through Stripe. Card details are encrypted and never stored on our servers.
                         </p>
                       </div>
                     </div>
                   </div>
 
-                  {/* Square Card Form Container */}
-                  <div className="bg-gray-800/50 rounded-xl p-4 border border-gray-700/50">
-                    <label className="block text-sm font-medium text-gray-300 mb-3">
-                      Card Information
-                    </label>
-                    <div 
-                      id="square-card-container" 
-                      ref={paymentFormRef}
-                      className="min-h-[120px]"
-                    >
-                      {!squareLoaded && (
-                        <div className="flex items-center justify-center h-32">
-                          <div className="text-center">
-                            <div className="animate-spin rounded-full h-8 w-8 border-4 border-purple-500 border-t-transparent mx-auto mb-2"></div>
-                            <p className="text-sm text-gray-400">Loading payment form...</p>
-                          </div>
+                  {/* Stripe Card Form */}
+                  {stripeLoaded && stripePromise ? (
+                    <Elements stripe={stripePromise}>
+                      <PaymentFormComponent
+                        onPayment={handlePayment}
+                        paymentProcessing={paymentProcessing}
+                      />
+                    </Elements>
+                  ) : (
+                    <div className="bg-gray-800/50 rounded-xl p-4 border border-gray-700/50">
+                      <div className="flex items-center justify-center h-32">
+                        <div className="text-center">
+                          <div className="animate-spin rounded-full h-8 w-8 border-4 border-purple-500 border-t-transparent mx-auto mb-2"></div>
+                          <p className="text-sm text-gray-400">Loading payment form...</p>
                         </div>
-                      )}
+                      </div>
                     </div>
-                  </div>
-
-                  {/* Payment Button */}
-                  <button
-                    onClick={handlePayment}
-                    disabled={paymentProcessing || !paymentForm || !squareLoaded}
-                    className={`w-full px-6 py-4 rounded-xl font-bold text-lg bg-gradient-to-r ${getGradientClasses(colorScheme, 'bg')} text-white hover:scale-[1.02] active:scale-[0.98] transition-all duration-200 shadow-lg shadow-purple-500/25 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-3`}
-                  >
-                    {paymentProcessing ? (
-                      <>
-                        <div className="animate-spin rounded-full h-6 w-6 border-3 border-white border-t-transparent"></div>
-                        <span>Processing Payment...</span>
-                      </>
-                    ) : (
-                      <>
-                        <CreditCard className="h-6 w-6" />
-                        <span>Pay with Square - $10.00</span>
-                        <Sparkles className="h-5 w-5" />
-                      </>
-                    )}
-                  </button>
+                  )}
                 </div>
               </div>
             </div>

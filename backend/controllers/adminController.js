@@ -166,7 +166,8 @@ export const getUserById = async (req, res) => {
         adminNotes: user.adminNotes || '',
         profileComplete: user.profileComplete || false,
         totalFileSizeUsed: user.totalFileSizeUsed || 0,
-        fileSizeLimit: user.fileSizeLimit || (250 * 1024 * 1024)
+        fileSizeLimit: user.fileSizeLimit || (250 * 1024 * 1024),
+        role: user.role || 'user'
       }
     });
   } catch (error) {
@@ -466,6 +467,78 @@ export const cancelUserSubscription = async (req, res) => {
   } catch (error) {
     console.error('Error cancelling user subscription:', error);
     res.status(500).json({ error: error.message || 'Error cancelling user subscription' });
+  }
+};
+
+// Change admin password
+export const changeAdminPassword = async (req, res) => {
+  try {
+    const adminId = req.userId; // Admin ID from middleware
+    const { currentPassword, newPassword } = req.body;
+
+    if (!currentPassword || !newPassword) {
+      return res.status(400).json({ error: 'Current password and new password are required' });
+    }
+
+    if (newPassword.length < 6) {
+      return res.status(400).json({ error: 'New password must be at least 6 characters long' });
+    }
+
+    // Get admin user
+    const admin = await userService.findById(adminId);
+    if (!admin) {
+      return res.status(404).json({ error: 'Admin user not found' });
+    }
+
+    // Verify current password
+    const isPasswordValid = await userService.comparePassword(currentPassword, admin.password);
+    if (!isPasswordValid) {
+      return res.status(401).json({ error: 'Current password is incorrect' });
+    }
+
+    // Update password
+    await userService.update(adminId, { password: newPassword });
+
+    res.status(200).json({
+      success: true,
+      message: 'Password changed successfully'
+    });
+  } catch (error) {
+    console.error('Error changing admin password:', error);
+    res.status(500).json({ error: error.message || 'Error changing password' });
+  }
+};
+
+// Promote user to admin
+export const promoteUserToAdmin = async (req, res) => {
+  try {
+    const { userId } = req.params;
+
+    // Get user to promote
+    const user = await userService.findById(userId);
+    if (!user) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+
+    // Check if user is already an admin
+    if (user.role === 'admin') {
+      return res.status(400).json({ error: 'User is already an admin' });
+    }
+
+    // Promote to admin
+    const updatedUser = await userService.update(userId, { role: 'admin' });
+
+    // Remove password from response
+    const { password, ...userWithoutPassword } = updatedUser;
+
+    res.status(200).json({
+      success: true,
+      message: 'User promoted to admin successfully',
+      user: userWithoutPassword
+    });
+  } catch (error) {
+    console.error('Error promoting user to admin:', error);
+    res.status(500).json({ error: error.message || 'Error promoting user to admin' });
   }
 };
 

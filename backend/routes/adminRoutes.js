@@ -12,7 +12,9 @@ import {
   suspendUser,
   unsuspendUser,
   updateUserNotes,
-  cancelUserSubscription
+  cancelUserSubscription,
+  changeAdminPassword,
+  promoteUserToAdmin
 } from '../controllers/adminController.js';
 import {
   createAccessCode,
@@ -36,19 +38,23 @@ router.get('/analytics', getAnalytics);
 
 // User management
 router.get('/users', getAllUsers);
-router.get('/users/:userId', getUserById);
 router.get('/users/:userId/nfts', getUserNFTDetails);
-router.put('/users/:userId', updateUser);
-router.delete('/users/:userId', deleteUser);
+router.post('/users/:userId/promote', promoteUserToAdmin);
 router.post('/users/:userId/suspend', suspendUser);
 router.post('/users/:userId/unsuspend', unsuspendUser);
 router.put('/users/:userId/notes', updateUserNotes);
+router.get('/users/:userId', getUserById);
+router.put('/users/:userId', updateUser);
+router.delete('/users/:userId', deleteUser);
 
 // Billing and invoices
 router.get('/billing/invoices', getBillingInvoices);
 
 // Subscription management
 router.post('/users/:userId/subscription/cancel', cancelUserSubscription);
+
+// Admin settings
+router.post('/change-password', changeAdminPassword);
 
 // Access code management
 router.post('/access-codes', createAccessCode);

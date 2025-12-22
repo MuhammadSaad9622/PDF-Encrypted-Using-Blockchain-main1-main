@@ -35,7 +35,7 @@ export const signup = async (req, res) => {
       agreedToTerms,
       agreedToPrivacy,
       agreedToEarlyAdopter,
-      paymentToken // Payment token from Square (if access code requires payment)
+      paymentMethodId // Payment method ID from Stripe (if access code requires payment)
     } = req.body;
 
     // Validate required fields
@@ -123,7 +123,7 @@ export const signup = async (req, res) => {
     
     // If access code has subscription plan, payment is required upfront
     if (accessCodeDoc.subscriptionPlan) {
-      if (!paymentToken) {
+      if (!paymentMethodId) {
         return res.status(400).json({ 
           error: 'Payment information is required for access codes with subscription plans' 
         });
@@ -180,8 +180,8 @@ export const signup = async (req, res) => {
     // Increment access code usage
     await accessCodeService.incrementUsage(accessCodeDoc.id);
 
-    // If subscription was activated and payment token was provided, create invoice
-    if (subscriptionPlan && paymentToken && subscriptionStatus === 'active') {
+    // If subscription was activated and payment method ID was provided, create invoice
+    if (subscriptionPlan && paymentMethodId && subscriptionStatus === 'active') {
       try {
         const { invoiceService } = await import('../services/invoiceService.js');
         
@@ -195,11 +195,11 @@ export const signup = async (req, res) => {
           currency: 'USD',
           subscriptionPlan: subscriptionPlan,
           status: 'Paid', // Mark as paid since it's a free period
-          paymentMethod: 'square',
-          description: `Subscription activation via access code - ${subscriptionPlan} plan${subscriptionDuration ? ` (${subscriptionDuration} days free)` : ''}`,
+          paymentMethod: 'stripe',
+          description: `Subscription activation via access code - ${subscriptionPlan} plan${accessCodeDoc.subscriptionDuration ? ` (${accessCodeDoc.subscriptionDuration} days free)` : ''}`,
           subscriptionStartDate: subscriptionStartDate,
           subscriptionEndDate: subscriptionEndDate,
-          transactionHash: `FREE-${paymentToken.substring(0, 8)}` // Store partial token reference for tracking
+          transactionHash: `FREE-${paymentMethodId.substring(0, 8)}` // Store partial payment method ID reference for tracking
         });
       } catch (invoiceError) {
         console.error('Error creating subscription invoice:', invoiceError);
@@ -367,7 +367,28 @@ export const getUserInvoices = async (req, res) => {
     // Get invoices from database for this user (using Supabase)
     const { invoiceService } = await import('../services/invoiceService.js');
     
-    // Get all invoices for this user
+    // Clean up old pending invoices (mark as Failed if older than 1 hour)
+    try {
+      const allUserInvoices = await invoiceService.findByUserId(userId);
+      const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000); // 1 hour ago
+      
+      for (const invoice of allUserInvoices) {
+        if (invoice.status === 'Pending') {
+          const invoiceDate = new Date(invoice.createdAt);
+          if (invoiceDate < oneHourAgo) {
+            // Mark old pending invoices as Failed (they were never completed)
+            await invoiceService.update(invoice.id, {
+              status: 'Failed'
+            });
+          }
+        }
+      }
+    } catch (cleanupError) {
+      console.error('Error cleaning up old pending invoices:', cleanupError);
+      // Continue even if cleanup fails
+    }
+    
+    // Get all invoices for this user (after cleanup)
     const invoices = await invoiceService.findByUserId(userId);
 
     // Apply pagination

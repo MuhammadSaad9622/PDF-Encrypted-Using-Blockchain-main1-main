@@ -4,6 +4,7 @@ import { authApi } from '../../utils/api';
 import { Lock, Mail, Eye, EyeOff } from 'lucide-react';
 import { useTheme, getGradientClasses } from '../../utils/theme';
 import Web3AnimatedBackground from './Web3AnimatedBackground';
+import AccountSelection from './AccountSelection';
 
 const SignIn = () => {
   const [email, setEmail] = useState('');
@@ -14,6 +15,9 @@ const SignIn = () => {
   const navigate = useNavigate();
   const { colorScheme } = useTheme();
 
+  const [showAccountSelection, setShowAccountSelection] = useState(false);
+  const [loginResponse, setLoginResponse] = useState<{ token: string; user: any } | null>(null);
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
@@ -21,23 +25,30 @@ const SignIn = () => {
 
     try {
       const response = await authApi.signin(email, password);
+      
+      // Check if user is admin - show account selection screen
+      if (response.user.role === 'admin') {
+        setLoginResponse({ token: response.token, user: response.user });
+        setShowAccountSelection(true);
+        setLoading(false);
+        return;
+      }
+      
+      // Regular user - go directly to dashboard
       localStorage.setItem('token', response.token);
       localStorage.setItem('user', JSON.stringify(response.user));
-      
-      // Check if user is admin and redirect accordingly
-      if (response.user.role === 'admin') {
-        localStorage.setItem('adminToken', response.token);
-        localStorage.setItem('adminUser', JSON.stringify(response.user));
-        navigate('/admin/dashboard');
-      } else {
-        navigate('/dashboard');
-      }
+      navigate('/dashboard');
     } catch (err: any) {
       setError(err.message || 'Failed to sign in');
     } finally {
       setLoading(false);
     }
   };
+
+  // Show account selection screen for admins
+  if (showAccountSelection && loginResponse) {
+    return <AccountSelection user={loginResponse.user} token={loginResponse.token} />;
+  }
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-dark-bg px-4 relative overflow-hidden">

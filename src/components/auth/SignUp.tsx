@@ -5,13 +5,92 @@ import { Lock, Mail, User, Eye, EyeOff, Phone, MapPin, Building, Key, Users, Che
 import { useTheme, getGradientClasses } from '../../utils/theme';
 import Web3AnimatedBackground from './Web3AnimatedBackground';
 import countries from '../../utils/countries';
+import { loadStripe, Stripe, StripeElements } from '@stripe/stripe-js';
+import { Elements, CardElement, useStripe, useElements } from '@stripe/react-stripe-js';
 
-// Declare Square types
-declare global {
-  interface Window {
-    Square?: any;
-  }
+// Payment Form Component using Stripe Elements
+interface PaymentFormComponentProps {
+  onVerify: (stripe: Stripe | null, elements: StripeElements | null) => Promise<void>;
+  paymentProcessing: boolean;
+  error: string | null;
 }
+
+const PaymentFormComponent: React.FC<PaymentFormComponentProps> = ({ onVerify, paymentProcessing, error }) => {
+  const stripe = useStripe();
+  const elements = useElements();
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!stripe || !elements) {
+      return;
+    }
+    await onVerify(stripe, elements);
+  };
+
+  const cardElementOptions = {
+    style: {
+      base: {
+        fontSize: '16px',
+        color: '#e5e7eb',
+        '::placeholder': {
+          color: '#6b7280',
+        },
+        fontFamily: 'system-ui, -apple-system, sans-serif',
+      },
+      invalid: {
+        color: '#ef4444',
+        iconColor: '#ef4444',
+      },
+    },
+    hidePostalCode: false,
+  };
+
+  return (
+    <div className="space-y-4">
+      <div className="relative bg-gradient-to-br from-gray-800/90 to-gray-900/90 border-2 border-gray-700/50 rounded-xl p-6 shadow-xl backdrop-blur-sm hover:border-blue-500/50 transition-all duration-300">
+        <div className="absolute inset-0 bg-gradient-to-r from-blue-500/5 via-transparent to-purple-500/5 rounded-xl pointer-events-none"></div>
+        <div className="absolute top-0 left-0 w-full h-px bg-gradient-to-r from-transparent via-blue-500/50 to-transparent pointer-events-none"></div>
+        
+        <div className="relative z-10">
+          <label className="block text-sm font-medium text-gray-300 mb-3">
+            Card Information
+          </label>
+          <div className="bg-gray-900/50 border border-gray-700/50 rounded-lg p-4">
+            <CardElement options={cardElementOptions} />
+          </div>
+        </div>
+      </div>
+      
+      {error && (
+        <div className="bg-red-500/10 border-2 border-red-500/50 text-red-400 px-5 py-4 rounded-xl text-sm flex items-start space-x-3 backdrop-blur-sm">
+          <AlertCircle className="h-5 w-5 flex-shrink-0 mt-0.5 text-red-400" />
+          <div className="flex-1">
+            <span className="font-medium">{error}</span>
+          </div>
+        </div>
+      )}
+      
+      <button
+        type="button"
+        onClick={(e) => {
+          e.preventDefault();
+          handleSubmit(e as any);
+        }}
+        disabled={!stripe || paymentProcessing}
+        className="btn-primary w-full py-3 disabled:opacity-50 disabled:cursor-not-allowed"
+      >
+        {paymentProcessing ? (
+          <>
+            <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin inline-block mr-2"></div>
+            Verifying Card...
+          </>
+        ) : (
+          'Continue to Agreements'
+        )}
+      </button>
+    </div>
+  );
+};
 
 const SignUp = () => {
   const [currentStep, setCurrentStep] = useState(1);
@@ -25,12 +104,10 @@ const SignUp = () => {
   const [accessCodeInfo, setAccessCodeInfo] = useState<{ subscriptionPlan?: string; subscriptionDuration?: number; requiresPayment?: boolean } | null>(null);
   
   // Payment step (added if access code requires payment)
-  const [squareConfig, setSquareConfig] = useState<any>(null);
-  const [squareLoaded, setSquareLoaded] = useState(false);
-  const [paymentForm, setPaymentForm] = useState<any>(null);
-  const paymentFormRef = useRef<HTMLDivElement>(null);
+  const [stripePromise, setStripePromise] = useState<Promise<Stripe | null> | null>(null);
+  const [stripeLoaded, setStripeLoaded] = useState(false);
   const [paymentProcessing, setPaymentProcessing] = useState(false);
-  const [paymentToken, setPaymentToken] = useState<string | null>(null);
+  const [paymentMethodId, setPaymentMethodId] = useState<string | null>(null);
 
   // Step 2: Basic Info
   const [email, setEmail] = useState('');
@@ -66,158 +143,25 @@ const SignUp = () => {
   const navigate = useNavigate();
   const { colorScheme } = useTheme();
 
-  // Load Square config on mount if needed or when payment step is reached
+  // Load Stripe config on mount if needed or when payment step is reached
   useEffect(() => {
     if (accessCodeInfo?.requiresPayment || accessCodeInfo?.subscriptionPlan || currentStep === 5) {
-      console.log('Loading Square config - accessCodeInfo:', accessCodeInfo, 'currentStep:', currentStep);
-      loadSquareConfig();
+      console.log('Loading Stripe config - accessCodeInfo:', accessCodeInfo, 'currentStep:', currentStep);
+      loadStripeConfig();
     }
   }, [accessCodeInfo?.requiresPayment, accessCodeInfo?.subscriptionPlan, currentStep]);
 
-  // Initialize Square payment form when on payment step (step 5)
-  useEffect(() => {
-    const shouldInitialize = currentStep === 5 && 
-      (accessCodeInfo?.requiresPayment || accessCodeInfo?.subscriptionPlan) && 
-      squareConfig && 
-      squareLoaded && 
-      paymentFormRef.current && 
-      !paymentForm;
-
-    if (shouldInitialize) {
-      console.log('Initializing Square payment form...');
-      const timer = setTimeout(() => {
-        initializeSquarePayment();
-      }, 300); // Increased timeout to ensure DOM is ready
-      return () => clearTimeout(timer);
-    }
-    
-    // Cleanup when leaving payment step
-    if (currentStep !== 5 && paymentForm) {
-      console.log('Cleaning up Square payment form...');
-      // Clean up Square form properly - let Square handle its own DOM cleanup
-      try {
-        if (paymentForm && typeof paymentForm.destroy === 'function') {
-          paymentForm.destroy();
-        }
-      } catch (e) {
-        console.warn('Error during Square form cleanup:', e);
-      } finally {
-        setPaymentForm(null);
-      }
-    }
-  }, [currentStep, accessCodeInfo?.requiresPayment, accessCodeInfo?.subscriptionPlan, squareConfig, squareLoaded, paymentForm]);
-
-  const loadSquareConfig = async () => {
+  const loadStripeConfig = async () => {
     try {
-      const response = await paymentApi.getSquareConfig();
-      if (response?.success && response?.config) {
-        setSquareConfig(response.config);
-        loadSquareSDK(response.config.sdkUrl);
+      const response = await paymentApi.getStripeConfig();
+      if (response?.success && response?.config?.publishableKey) {
+        const stripe = loadStripe(response.config.publishableKey);
+        setStripePromise(stripe);
+        setStripeLoaded(true);
       }
     } catch (error: any) {
-      console.error('Error loading Square config:', error);
-    }
-  };
-
-  const loadSquareSDK = (sdkUrl: string) => {
-    console.log('loadSquareSDK called with URL:', sdkUrl);
-    
-    if (window.Square && window.Square.payments) {
-      console.log('Square SDK already loaded');
-      setSquareLoaded(true);
-      return;
-    }
-
-    const existingScript = document.querySelector(`script[src="${sdkUrl}"]`);
-    if (existingScript) {
-      console.log('Square SDK script already exists, waiting for it to load...');
-      const checkInterval = setInterval(() => {
-        if (window.Square && window.Square.payments) {
-          console.log('Square SDK loaded from existing script');
-          setSquareLoaded(true);
-          clearInterval(checkInterval);
-        }
-      }, 100);
-      setTimeout(() => {
-        clearInterval(checkInterval);
-        if (!window.Square || !window.Square.payments) {
-          console.warn('Square SDK did not load within timeout');
-        }
-      }, 10000); // Increased timeout to 10 seconds
-      return;
-    }
-
-    console.log('Creating new Square SDK script tag...');
-    const script = document.createElement('script');
-    script.src = sdkUrl;
-    script.type = 'text/javascript';
-    script.async = true;
-    script.onload = () => {
-      console.log('Square SDK script loaded, checking for payments API...');
-      setTimeout(() => {
-        if (window.Square && window.Square.payments) {
-          console.log('Square payments API available');
-          setSquareLoaded(true);
-        } else {
-          console.warn('Square SDK loaded but payments API not available');
-        }
-      }, 200);
-    };
-    script.onerror = (error) => {
-      console.error('Failed to load Square SDK:', error);
+      console.error('Error loading Stripe config:', error);
       setError('Failed to load payment system. Please refresh the page.');
-    };
-    document.head.appendChild(script);
-  };
-
-  const initializeSquarePayment = async () => {
-    console.log('initializeSquarePayment called', {
-      hasSquare: !!window.Square,
-      hasPayments: !!(window.Square && window.Square.payments),
-      hasConfig: !!squareConfig,
-      hasRef: !!paymentFormRef.current,
-      alreadyHasForm: !!paymentForm
-    });
-
-    if (!window.Square || !window.Square.payments) {
-      console.error('Square SDK not loaded');
-      setError('Payment form is loading. Please wait...');
-      return;
-    }
-
-    if (!squareConfig) {
-      console.error('Square config not available');
-      setError('Payment configuration is missing. Please refresh the page.');
-      return;
-    }
-
-    if (!paymentFormRef.current) {
-      console.error('Payment form container ref not available');
-      setError('Payment form container is not ready. Please try again.');
-      return;
-    }
-
-    if (paymentForm) {
-      console.log('Payment form already initialized');
-      return;
-    }
-
-    try {
-      console.log('Creating Square payments instance...');
-      const payments = window.Square.payments(squareConfig.applicationId, squareConfig.locationId);
-      
-      console.log('Creating card payment method...');
-      const card = await payments.card();
-      
-      console.log('Attaching card to DOM...', paymentFormRef.current);
-      await card.attach(paymentFormRef.current);
-      
-      console.log('Square payment form initialized successfully');
-      setPaymentForm(card);
-      setError(null); // Clear any previous errors
-    } catch (error: any) {
-      console.error('Error initializing Square payment:', error);
-      setError(`Failed to load payment form: ${error.message || 'Please refresh the page and try again.'}`);
     }
   };
 
@@ -368,17 +312,9 @@ const SignUp = () => {
     } else if (currentStep === 5) {
       // Step 5: Payment (if required) or Agreements (if no payment)
       if (accessCodeInfo?.requiresPayment || accessCodeInfo?.subscriptionPlan) {
-        // Payment step - verify card before proceeding
-        if (!paymentForm) {
-          setError('Payment form is loading. Please wait a moment.');
-          return;
-        }
-        if (!squareLoaded) {
-          setError('Payment form is still initializing. Please wait.');
-          return;
-        }
-        // Verify card before proceeding to agreements
-        handleVerifyCardBeforeAgreements();
+        // Payment step - verification is handled by PaymentFormComponent
+        // This should not be reached if payment form is properly set up
+        setError('Please verify your payment information using the button below.');
         return;
       } else {
         // No payment required - check agreements
@@ -413,9 +349,10 @@ const SignUp = () => {
   };
 
   // Verify card before proceeding to agreements step (called from payment step)
-  const handleVerifyCardBeforeAgreements = async () => {
-    if (!paymentForm || !squareConfig) {
-      setError('Payment form is not ready. Please wait a moment and try again.');
+  // This will be called from the PaymentFormComponent
+  const handleVerifyCardBeforeAgreements = async (stripe: Stripe | null, elements: StripeElements | null) => {
+    if (!stripe || !elements) {
+      setError('Payment system is not ready. Please wait a moment and try again.');
       return;
     }
 
@@ -423,73 +360,66 @@ const SignUp = () => {
     setError(null);
 
     try {
-      // Step 1: Tokenize the card to check if it's filled and valid
-      console.log('Attempting to tokenize card...');
-      
-      let tokenResult;
-      try {
-        tokenResult = await paymentForm.tokenize();
-        console.log('Tokenize result:', tokenResult);
-      } catch (tokenizeError: any) {
-        console.error('Tokenize error caught:', tokenizeError);
-        // Square might throw an error instead of returning status
-        const errorMessage = tokenizeError.message || tokenizeError.detail || 'Please enter valid card information';
-        setError(errorMessage);
-        setPaymentProcessing(false);
-        return;
-      }
-      
-      if (!tokenResult) {
-        setError('Please enter your card information');
+      // Step 1: Get card element
+      const cardElement = elements.getElement(CardElement);
+      if (!cardElement) {
+        setError('Card information is required');
         setPaymentProcessing(false);
         return;
       }
 
-      if (tokenResult.status !== 'OK') {
-        let errorMessage = 'Please enter valid card information';
-        
-        // Check for errors array
-        if (tokenResult.errors && Array.isArray(tokenResult.errors) && tokenResult.errors.length > 0) {
-          errorMessage = tokenResult.errors.map((e: any) => {
-            return e.detail || e.message || e.field || 'Invalid card information';
-          }).join(', ');
-        } 
-        // Check for individual error messages
-        else if (tokenResult.message) {
-          errorMessage = tokenResult.message;
-        } 
-        // Check for status code
-        else if (tokenResult.status) {
-          errorMessage = `Card validation failed: ${tokenResult.status}. Please check your card information.`;
-        }
-        
-        console.error('Tokenization failed:', tokenResult);
+      // Step 2: Create payment method
+      console.log('Creating payment method...');
+      const { error: pmError, paymentMethod } = await stripe.createPaymentMethod({
+        type: 'card',
+        card: cardElement,
+      });
+
+      if (pmError || !paymentMethod) {
+        const errorMessage = pmError?.message || 'Please enter valid card information';
+        console.error('Payment method creation failed:', pmError);
         setError(errorMessage);
         setPaymentProcessing(false);
         return;
       }
 
-      if (!tokenResult.token) {
-        setError('Please enter complete card information');
-        setPaymentProcessing(false);
-        return;
-      }
+      console.log('Payment method created:', paymentMethod.id);
 
-      // Step 2: Verify card with $1 charge (will be refunded)
+      // Step 3: Verify card using Setup Intent (no charge)
       try {
         console.log('Verifying card with backend...');
-        const verificationResponse = await paymentApi.verifyCard(tokenResult.token);
+        const verificationResponse = await paymentApi.verifyCard(paymentMethod.id);
         
         console.log('Verification response:', verificationResponse);
         
         if (verificationResponse.success && verificationResponse.verified) {
-          // Store the token for later use in handleSubmit
-          setPaymentToken(tokenResult.token);
+          // Store the payment method ID for later use in handleSubmit
+          setPaymentMethodId(paymentMethod.id);
           // Clear any previous errors
           setError(null);
           // Proceed to agreements step
           setCurrentStep(6);
           setPaymentProcessing(false);
+        } else if (verificationResponse.requiresAction && verificationResponse.clientSecret) {
+          // Handle 3D Secure authentication for Setup Intent
+          console.log('Card requires 3D Secure authentication...');
+          const { error: confirmError } = await stripe.confirmCardSetup(verificationResponse.clientSecret, {
+            payment_method: {
+              card: cardElement,
+            }
+          });
+
+          if (confirmError) {
+            console.error('3D Secure confirmation failed:', confirmError);
+            setError(confirmError.message || 'Card verification failed. Please try again.');
+            setPaymentProcessing(false);
+          } else {
+            // 3D Secure authentication successful, card is verified
+            setPaymentMethodId(paymentMethod.id);
+            setError(null);
+            setCurrentStep(6);
+            setPaymentProcessing(false);
+          }
         } else {
           const errorMsg = verificationResponse.error || 'Card verification failed. Please check your card information.';
           console.error('Verification failed:', errorMsg);
@@ -504,105 +434,12 @@ const SignUp = () => {
       }
     } catch (err: any) {
       console.error('Unexpected error:', err);
-      // Handle different error types
-      let errorMessage = 'Please enter valid card information';
-      if (err.errors && Array.isArray(err.errors)) {
-        errorMessage = err.errors.map((e: any) => e.detail || e.message).join(', ');
-      } else if (err.message) {
-        errorMessage = err.message;
-      } else if (err.detail) {
-        errorMessage = err.detail;
-      }
+      const errorMessage = err.message || 'Please enter valid card information';
       setError(errorMessage);
       setPaymentProcessing(false);
     }
   };
 
-  // Validate payment and submit (called from agreements step)
-  const handleValidatePaymentAndSubmit = async () => {
-    if (!paymentForm || !squareConfig) {
-      setError('Payment form is not ready. Please wait a moment and try again.');
-      return;
-    }
-
-    try {
-      setPaymentProcessing(true);
-      setError(null);
-
-      // Step 1: Tokenize the card
-      const tokenResult = await paymentForm.tokenize();
-      
-      if (tokenResult.status !== 'OK') {
-        let errorMessage = 'Please check your card information';
-        if (tokenResult.errors && tokenResult.errors.length > 0) {
-          errorMessage = tokenResult.errors.map((e: any) => e.detail).join(', ');
-        }
-        setError(errorMessage);
-        setPaymentProcessing(false);
-        return;
-      }
-
-      // Step 2: Verify card with $1 charge (will be refunded)
-      try {
-        const verificationResponse = await paymentApi.verifyCard(tokenResult.token);
-        
-        if (verificationResponse.success && verificationResponse.verified) {
-          // Store the token for use in handleSubmit
-          setPaymentToken(tokenResult.token);
-          // Clear any previous errors
-          setError(null);
-          // Now proceed with signup
-          await handleSubmit();
-        } else {
-          setError(verificationResponse.error || 'Card verification failed. Please check your card information.');
-          setPaymentProcessing(false);
-        }
-      } catch (verifyError: any) {
-        setError(verifyError.error || verifyError.message || 'Card verification failed. Please check your card information.');
-        setPaymentProcessing(false);
-      }
-    } catch (err: any) {
-      setError(err.message || 'Failed to validate payment information. Please check your card details.');
-      setPaymentProcessing(false);
-    }
-  };
-
-  // Process payment for signup (uses already tokenized payment if available)
-  const handleProcessPayment = async () => {
-    if (!paymentForm || !squareConfig) {
-      setError('Payment form is not ready. Please wait a moment and try again.');
-      throw new Error('Payment form not ready');
-    }
-
-    try {
-      setPaymentProcessing(true);
-      setError(null);
-
-      // Use existing token if available, otherwise tokenize
-      if (paymentToken) {
-        return paymentToken;
-      }
-
-      // Tokenize the card
-      const tokenResult = await paymentForm.tokenize();
-      
-      if (tokenResult.status === 'OK') {
-        setPaymentToken(tokenResult.token);
-        return tokenResult.token;
-      } else {
-        let errorMessage = 'Failed to process card information';
-        if (tokenResult.errors && tokenResult.errors.length > 0) {
-          errorMessage = tokenResult.errors.map((e: any) => e.detail).join(', ');
-        }
-        throw new Error(errorMessage);
-      }
-    } catch (err: any) {
-      setError(err.message || 'Failed to process payment');
-      throw err;
-    } finally {
-      setPaymentProcessing(false);
-    }
-  };
 
   // Submit form
   const handleSubmit = async () => {
@@ -610,14 +447,13 @@ const SignUp = () => {
     setLoading(true);
 
     try {
-      // If payment is required, use the already validated token (should already be set from step 5)
-      let finalPaymentToken: string | null = null;
+      // If payment is required, use the already validated payment method ID (should already be set from step 5)
+      let finalPaymentMethodId: string | null = null;
       if ((accessCodeInfo?.requiresPayment || accessCodeInfo?.subscriptionPlan) && currentStep === 6) {
-        if (!paymentToken) {
-          // If somehow we don't have a token, try to get one (shouldn't happen if validation worked)
-          finalPaymentToken = await handleProcessPayment();
+        if (!paymentMethodId) {
+          throw new Error('Payment method not found. Please go back and verify your card.');
         } else {
-          finalPaymentToken = paymentToken;
+          finalPaymentMethodId = paymentMethodId;
         }
       }
 
@@ -639,9 +475,9 @@ const SignUp = () => {
         agreedToEarlyAdopter,
       };
 
-      // Include payment token if provided
-      if (finalPaymentToken) {
-        signupData.paymentToken = finalPaymentToken;
+      // Include payment method ID if provided
+      if (finalPaymentMethodId) {
+        signupData.paymentMethodId = finalPaymentMethodId;
       }
 
       const response = await authApi.signup(signupData);
@@ -1028,7 +864,7 @@ const SignUp = () => {
                     </div>
                   </div>
 
-                  {/* Enhanced Payment Form Section */}
+                    {/* Enhanced Payment Form Section */}
                   <div className="space-y-4">
                     <div className="flex items-center justify-between">
                       <label className="block text-base font-semibold text-white flex items-center gap-2">
@@ -1038,35 +874,26 @@ const SignUp = () => {
                       </label>
                       <div className="flex items-center gap-2 text-xs text-gray-400">
                         <Shield className="h-3 w-3 text-green-400" />
-                        <span>Secured by Square</span>
+                        <span>Secured by Stripe</span>
                       </div>
                     </div>
                     
-                    <div className="relative bg-gradient-to-br from-gray-800/90 to-gray-900/90 border-2 border-gray-700/50 rounded-xl p-6 min-h-[220px] shadow-xl backdrop-blur-sm hover:border-blue-500/50 transition-all duration-300">
-                      {/* Decorative background elements */}
-                      <div className="absolute inset-0 bg-gradient-to-r from-blue-500/5 via-transparent to-purple-500/5 rounded-xl pointer-events-none"></div>
-                      <div className="absolute top-0 left-0 w-full h-px bg-gradient-to-r from-transparent via-blue-500/50 to-transparent pointer-events-none"></div>
-                      
-                      {/* Square Payment Form Container - Square will populate this */}
-                      <div 
-                        ref={paymentFormRef}
-                        className="relative z-10"
-                        id="square-payment-form-container"
-                      >
-                        {!squareLoaded && !paymentForm && (
-                          <div className="flex flex-col items-center justify-center h-32 space-y-3">
-                            <div className="w-10 h-10 border-4 border-blue-500/30 border-t-blue-500 rounded-full animate-spin"></div>
-                            <div className="text-gray-400 text-sm">Loading secure payment form...</div>
-                          </div>
-                        )}
-                        {squareLoaded && !paymentForm && (
-                          <div className="flex flex-col items-center justify-center h-32 space-y-3">
-                            <div className="w-10 h-10 border-4 border-purple-500/30 border-t-purple-500 rounded-full animate-spin"></div>
-                            <div className="text-gray-400 text-sm">Initializing payment processor...</div>
-                          </div>
-                        )}
+                    {stripeLoaded && stripePromise ? (
+                      <Elements stripe={stripePromise}>
+                        <PaymentFormComponent
+                          onVerify={handleVerifyCardBeforeAgreements}
+                          paymentProcessing={paymentProcessing}
+                          error={error}
+                        />
+                      </Elements>
+                    ) : (
+                      <div className="relative bg-gradient-to-br from-gray-800/90 to-gray-900/90 border-2 border-gray-700/50 rounded-xl p-6 min-h-[220px] shadow-xl backdrop-blur-sm">
+                        <div className="flex flex-col items-center justify-center h-32 space-y-3">
+                          <div className="w-10 h-10 border-4 border-blue-500/30 border-t-blue-500 rounded-full animate-spin"></div>
+                          <div className="text-gray-400 text-sm">Loading secure payment form...</div>
+                        </div>
                       </div>
-                    </div>
+                    )}
                     
                     {/* Security badges */}
                     <div className="flex items-center justify-center gap-6 pt-2">
@@ -1086,15 +913,6 @@ const SignUp = () => {
                       </div>
                     </div>
                   </div>
-
-                  {error && (
-                    <div className="bg-red-500/10 border-2 border-red-500/50 text-red-400 px-5 py-4 rounded-xl text-sm flex items-start space-x-3 backdrop-blur-sm animate-pulse">
-                      <AlertCircle className="h-5 w-5 flex-shrink-0 mt-0.5 text-red-400" />
-                      <div className="flex-1">
-                        <span className="font-medium">{error}</span>
-                      </div>
-                    </div>
-                  )}
                 </div>
               ) : (
                 /* Show agreements if no payment required */
@@ -1209,38 +1027,53 @@ const SignUp = () => {
           )}
 
           {/* Navigation Buttons */}
-          <div className="flex justify-between mt-8">
-            <button
-              type="button"
-              onClick={handlePrevious}
-              disabled={currentStep === 1}
-              className="btn-secondary flex items-center space-x-2 disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              <ChevronLeft className="w-5 h-5" />
-              <span>Previous</span>
-            </button>
+          {/* Hide Next button on payment step (step 5) if payment is required - PaymentFormComponent has its own button */}
+          {!(currentStep === 5 && (accessCodeInfo?.requiresPayment || accessCodeInfo?.subscriptionPlan)) && (
+            <div className="flex justify-between mt-8">
+              <button
+                type="button"
+                onClick={handlePrevious}
+                disabled={currentStep === 1}
+                className="btn-secondary flex items-center space-x-2 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                <ChevronLeft className="w-5 h-5" />
+                <span>Previous</span>
+              </button>
 
-            <button
-              type="button"
-              onClick={handleNext}
-              disabled={loading || paymentProcessing}
-              className="btn-primary flex items-center space-x-2 disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              {(loading || paymentProcessing) && (
-                <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>
-              )}
-              <span>
-                {currentStep === totalSteps 
-                  ? (loading || paymentProcessing ? 'Creating Account...' : 'Create Account')
-                  : currentStep === 5 && (accessCodeInfo?.requiresPayment || accessCodeInfo?.subscriptionPlan)
-                  ? (paymentProcessing ? 'Verifying Card...' : 'Continue to Agreements')
-                  : currentStep === 6
-                  ? (paymentProcessing ? 'Verifying Card...' : loading ? 'Creating Account...' : 'Create Account')
-                  : 'Next'}
-              </span>
-              {currentStep < totalSteps && <ChevronRight className="w-5 h-5" />}
-            </button>
-          </div>
+              <button
+                type="button"
+                onClick={handleNext}
+                disabled={loading || paymentProcessing}
+                className="btn-primary flex items-center space-x-2 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {(loading || paymentProcessing) && (
+                  <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>
+                )}
+                <span>
+                  {currentStep === totalSteps 
+                    ? (loading || paymentProcessing ? 'Creating Account...' : 'Create Account')
+                    : currentStep === 6
+                    ? (loading ? 'Creating Account...' : 'Create Account')
+                    : 'Next'}
+                </span>
+                {currentStep < totalSteps && <ChevronRight className="w-5 h-5" />}
+              </button>
+            </div>
+          )}
+          
+          {/* Show Previous button only on payment step */}
+          {currentStep === 5 && (accessCodeInfo?.requiresPayment || accessCodeInfo?.subscriptionPlan) && (
+            <div className="flex justify-start mt-8">
+              <button
+                type="button"
+                onClick={handlePrevious}
+                className="btn-secondary flex items-center space-x-2"
+              >
+                <ChevronLeft className="w-5 h-5" />
+                <span>Previous</span>
+              </button>
+            </div>
+          )}
 
           <div className="mt-6 text-center">
             <p className="text-gray-400 text-sm">

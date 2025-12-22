@@ -15,13 +15,15 @@ import {
   Shield,
   Receipt,
   UserCircle,
-  Key
+  Key,
+  Settings
 } from 'lucide-react';
 import { adminApi } from '../../utils/api';
 import UserManagement from './UserManagement';
 import BillingInvoices from './BillingInvoices';
 import UserDetails from './UserDetails';
 import AccessCodeManagement from './AccessCodeManagement';
+import AdminSettings from './AdminSettings';
 
 interface DashboardStats {
   overview: {
@@ -73,7 +75,7 @@ const AdminDashboard = () => {
     return 'User';
   };
   const [sidebarOpen, setSidebarOpen] = useState(true);
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'users' | 'analytics' | 'billing' | 'access-codes' | 'user-details'>('dashboard');
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'users' | 'analytics' | 'billing' | 'access-codes' | 'user-details' | 'settings'>('dashboard');
   const [adminUser, setAdminUser] = useState<any>(null);
   const [selectedUserId, setSelectedUserId] = useState<string | null>(null);
   const [pendingUserId, setPendingUserId] = useState<string | null>(null);
@@ -136,6 +138,7 @@ const AdminDashboard = () => {
     { icon: UserCog, label: 'User Management', tab: 'users' as const },
     { icon: Key, label: 'Access Codes', tab: 'access-codes' as const },
     { icon: Receipt, label: 'Billing & Invoices', tab: 'billing' as const },
+    { icon: Settings, label: 'Settings', tab: 'settings' as const },
   ];
 
   if (loading && !stats) {
@@ -373,6 +376,8 @@ const AdminDashboard = () => {
           {activeTab === 'billing' && <BillingInvoices />}
 
           {activeTab === 'access-codes' && <AccessCodeManagement />}
+
+          {activeTab === 'settings' && <AdminSettings />}
 
           {activeTab === 'user-details' && (
             <>

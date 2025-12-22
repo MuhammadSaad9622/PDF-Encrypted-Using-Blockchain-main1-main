@@ -2,11 +2,10 @@ import express from 'express';
 import {
   createSubscriptionPayment,
   processSubscriptionPayment,
-  handleSquareWebhook,
+  handleStripeWebhook,
   getSubscriptionStatus,
-  getSquareConfig,
+  getStripeConfig,
   cancelSubscription,
-  getSquareLocations,
   verifyCard
 } from '../controllers/paymentController.js';
 import { authenticate } from '../middleware/auth.js';
@@ -15,18 +14,15 @@ const router = express.Router();
 
 // Public webhook route (no auth, but signature verified in controller)
 // Use express.raw() to get raw body for signature verification
-router.post('/square/webhook', express.raw({ type: 'application/json' }), handleSquareWebhook);
+router.post('/stripe/webhook', express.raw({ type: 'application/json' }), handleStripeWebhook);
 
-// Public Square config route (needed for frontend SDK initialization)
-router.get('/square/config', getSquareConfig);
-
-// Public Square locations route (to help debug location ID issues)
-router.get('/square/locations', getSquareLocations);
+// Public Stripe config route (needed for frontend SDK initialization)
+router.get('/stripe/config', getStripeConfig);
 
 // Authenticated payment routes
-router.post('/square/create-subscription', authenticate, createSubscriptionPayment);
-router.post('/square/process-subscription', authenticate, processSubscriptionPayment);
-router.post('/square/verify-card', verifyCard); // No auth needed - used during signup
+router.post('/stripe/create-subscription', authenticate, createSubscriptionPayment);
+router.post('/stripe/process-subscription', authenticate, processSubscriptionPayment);
+router.post('/stripe/verify-card', verifyCard); // No auth needed - used during signup
 router.get('/subscription/status', authenticate, getSubscriptionStatus);
 router.post('/subscription/cancel', authenticate, cancelSubscription);
 

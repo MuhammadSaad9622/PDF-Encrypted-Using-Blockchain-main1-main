@@ -16,6 +16,8 @@ const mapSupabaseInvoice = (invoice) => {
     paymentMethod: invoice.payment_method,
     squarePaymentId: invoice.square_payment_id,
     squareOrderId: invoice.square_order_id,
+    stripePaymentIntentId: invoice.stripe_payment_intent_id,
+    stripePaymentId: invoice.stripe_payment_id,
     subscriptionStartDate: invoice.subscription_start_date,
     subscriptionEndDate: invoice.subscription_end_date,
     description: invoice.description,
@@ -38,6 +40,8 @@ const mapToSupabaseInvoice = (invoice) => {
   if (invoice.paymentMethod !== undefined) supabaseInvoice.payment_method = invoice.paymentMethod;
   if (invoice.squarePaymentId !== undefined) supabaseInvoice.square_payment_id = invoice.squarePaymentId;
   if (invoice.squareOrderId !== undefined) supabaseInvoice.square_order_id = invoice.squareOrderId;
+  if (invoice.stripePaymentIntentId !== undefined) supabaseInvoice.stripe_payment_intent_id = invoice.stripePaymentIntentId;
+  if (invoice.stripePaymentId !== undefined) supabaseInvoice.stripe_payment_id = invoice.stripePaymentId;
   if (invoice.subscriptionStartDate !== undefined) supabaseInvoice.subscription_start_date = invoice.subscriptionStartDate;
   if (invoice.subscriptionEndDate !== undefined) supabaseInvoice.subscription_end_date = invoice.subscriptionEndDate;
   if (invoice.description !== undefined) supabaseInvoice.description = invoice.description;
@@ -119,6 +123,25 @@ export const invoiceService = {
     return mapSupabaseInvoice(data);
   },
 
+  // Find invoice by stripePaymentIntentId
+  findByStripePaymentIntentId: async (stripePaymentIntentId) => {
+    if (!supabase) {
+      throw new Error('Supabase is not configured');
+    }
+    
+    const { data, error } = await supabase
+      .from('invoices')
+      .select('*')
+      .eq('stripe_payment_intent_id', stripePaymentIntentId)
+      .single();
+    
+    if (error && error.code !== 'PGRST116') {
+      throw error;
+    }
+    
+    return mapSupabaseInvoice(data);
+  },
+
   // Create new invoice
   create: async (invoiceData) => {
     if (!supabase) {
@@ -173,6 +196,8 @@ export const invoiceService = {
       invoice = await invoiceService.findByInvoiceId(query.invoiceId);
     } else if (query.squarePaymentId) {
       invoice = await invoiceService.findBySquarePaymentId(query.squarePaymentId);
+    } else if (query.stripePaymentIntentId) {
+      invoice = await invoiceService.findByStripePaymentIntentId(query.stripePaymentIntentId);
     } else if (query.id) {
       invoice = await invoiceService.findById(query.id);
     }
@@ -195,6 +220,9 @@ export const invoiceService = {
     }
     if (query.squarePaymentId) {
       return await invoiceService.findBySquarePaymentId(query.squarePaymentId);
+    }
+    if (query.stripePaymentIntentId) {
+      return await invoiceService.findByStripePaymentIntentId(query.stripePaymentIntentId);
     }
     if (query.id) {
       return await invoiceService.findById(query.id);

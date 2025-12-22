@@ -650,23 +650,44 @@ export const adminApi = {
       },
     });
   },
+
+  // Admin settings
+  changeAdminPassword: async (currentPassword: string, newPassword: string) => {
+    const token = localStorage.getItem('adminToken');
+    return apiCall('/api/admin/change-password', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${token}`,
+      },
+      body: JSON.stringify({ currentPassword, newPassword }),
+    });
+  },
+
+  promoteUserToAdmin: async (userId: string) => {
+    const token = localStorage.getItem('adminToken');
+    return apiCall(`/api/admin/users/${userId}/promote`, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${token}`,
+      },
+    });
+  },
 };
 
 // Payment API calls
 export const paymentApi = {
   createSubscriptionPayment: async () => {
-    return apiCall('/api/payments/square/create-subscription', {
+    return apiCall('/api/payments/stripe/create-subscription', {
       method: 'POST',
     });
   },
 
   processSubscriptionPayment: async (data: {
-    sourceId: string;
-    orderId: string;
+    paymentIntentId: string;
+    paymentMethodId: string;
     invoiceId: string;
-    idempotencyKey?: string;
   }) => {
-    return apiCall('/api/payments/square/process-subscription', {
+    return apiCall('/api/payments/stripe/process-subscription', {
       method: 'POST',
       body: JSON.stringify(data),
     });
@@ -682,14 +703,14 @@ export const paymentApi = {
     });
   },
 
-  getSquareConfig: async () => {
-    return apiCall('/api/payments/square/config');
+  getStripeConfig: async () => {
+    return apiCall('/api/payments/stripe/config');
   },
 
-  verifyCard: async (sourceId: string) => {
-    return apiCall('/api/payments/square/verify-card', {
+  verifyCard: async (paymentMethodId: string) => {
+    return apiCall('/api/payments/stripe/verify-card', {
       method: 'POST',
-      body: JSON.stringify({ sourceId }),
+      body: JSON.stringify({ paymentMethodId }),
     });
   },
 };

@@ -1,315 +1,169 @@
-import pkg from 'square';
+import Stripe from 'stripe';
 import { invoiceService } from '../services/invoiceService.js';
 import { userService } from '../services/userService.js';
 import crypto from 'crypto';
 
-const { SquareClient, SquareEnvironment } = pkg;
-
-// Initialize Square client lazily (on first use)
-let squareClient = null;
-let cachedLocationId = null; // Cache the validated location ID
+// Initialize Stripe client lazily (on first use)
+let stripeClient = null;
 
 /**
- * Get a valid location ID - either from env or by fetching available locations
+ * Get or initialize Stripe client
  */
-async function getValidLocationId(client) {
-  // If we have a cached valid location ID, use it
-  if (cachedLocationId) {
-    return cachedLocationId;
+function getStripeClient() {
+  if (stripeClient) {
+    return stripeClient;
   }
 
-  const configuredLocationId = process.env.SQUARE_LOCATION_ID;
-  
-  // Try to fetch available locations
-  try {
-    const locationsResponse = await client.locations.list();
-    
-    if (locationsResponse.errors && locationsResponse.errors.length > 0) {
-      console.warn('⚠️ Could not fetch locations:', locationsResponse.errors[0].detail);
-      // Fall back to configured location ID
-      return configuredLocationId;
-    }
-
-    const locations = locationsResponse.locations || [];
-    
-    if (locations.length === 0) {
-      console.warn('⚠️ No locations found. Using configured location ID.');
-      return configuredLocationId;
-    }
-
-    // Check if configured location ID is in the list
-    const locationIds = locations.map(loc => loc.id);
-    const isValidLocation = configuredLocationId && locationIds.includes(configuredLocationId);
-    
-    if (isValidLocation) {
-      console.log(`✅ Using configured location ID: ${configuredLocationId}`);
-      cachedLocationId = configuredLocationId;
-      return configuredLocationId;
-    } else {
-      // Use the first available location
-      const firstLocation = locations[0];
-      console.warn(`⚠️ Configured location ID (${configuredLocationId}) is not accessible.`);
-      console.warn(`✅ Using first available location: ${firstLocation.id} (${firstLocation.name || 'Unnamed'})`);
-      cachedLocationId = firstLocation.id;
-      return firstLocation.id;
-    }
-  } catch (error) {
-    console.error('Error fetching locations:', error);
-    // Fall back to configured location ID
-    return configuredLocationId;
-  }
-}
-
-/**
- * Get or initialize Square client
- */
-function getSquareClient() {
-  if (squareClient) {
-    return squareClient;
-  }
-
-  // Check if access token is available
-  if (!process.env.SQUARE_ACCESS_TOKEN) {
-    console.warn('⚠️ SQUARE_ACCESS_TOKEN not set. Square payment features will not work.');
+  // Check if secret key is available
+  if (!process.env.STRIPE_SECRET_KEY) {
+    console.warn('⚠️ STRIPE_SECRET_KEY not set. Stripe payment features will not work.');
     return null;
   }
 
   try {
-    const accessToken = process.env.SQUARE_ACCESS_TOKEN;
-    const environment = process.env.SQUARE_ENVIRONMENT === 'production' 
-      ? SquareEnvironment.Production 
-      : SquareEnvironment.Sandbox;
+    const secretKey = process.env.STRIPE_SECRET_KEY;
     
-    if (!accessToken) {
-      console.warn('⚠️ SQUARE_ACCESS_TOKEN not set. Square payment features will not work.');
-      return null;
-    }
-    
-    // Log token info (first and last 4 chars for security)
-    const tokenPreview = accessToken.length > 8 
-      ? `${accessToken.substring(0, 4)}...${accessToken.substring(accessToken.length - 4)}`
+    // Log key info (first and last 4 chars for security)
+    const keyPreview = secretKey.length > 8 
+      ? `${secretKey.substring(0, 8)}...${secretKey.substring(secretKey.length - 4)}`
       : '***';
-    console.log(`✅ Square client initializing with token: ${tokenPreview}`);
-    console.log(`✅ Square environment: ${process.env.SQUARE_ENVIRONMENT || 'sandbox'}`);
+    console.log(`✅ Stripe client initializing with key: ${keyPreview}`);
     
-    squareClient = new SquareClient({
-      token: accessToken, // In SDK v42, it's 'token', not 'accessToken'
-      environment: environment,
+    // Determine environment from key prefix
+    const environment = secretKey.startsWith('sk_live_') ? 'production' : 'test';
+    console.log(`✅ Stripe environment: ${environment}`);
+    
+    stripeClient = new Stripe(secretKey, {
+      apiVersion: '2024-12-18.acacia',
     });
     
-    // Log client structure for debugging
-    console.log('✅ Square client initialized successfully');
+    console.log('✅ Stripe client initialized successfully');
     
-    // In Square SDK v42, APIs are accessed as getters: client.orders and client.payments
-    try {
-      // Try to access the APIs to verify they're available
-      const testOrdersApi = squareClient.orders;
-      const testPaymentsApi = squareClient.payments;
-      
-      if (testOrdersApi) {
-        console.log('✅ Square orders API is available');
-      } else {
-        console.warn('⚠️ Square orders API is null/undefined');
-      }
-      
-      if (testPaymentsApi) {
-        console.log('✅ Square payments API is available');
-      } else {
-        console.warn('⚠️ Square payments API is null/undefined');
-      }
-    } catch (e) {
-      console.warn('⚠️ Error accessing APIs:', e.message);
-      // APIs might be lazy-loaded, so this is not necessarily an error
-    }
-    
-    return squareClient;
+    return stripeClient;
   } catch (error) {
-    console.error('❌ Error initializing Square client:', error);
+    console.error('❌ Error initializing Stripe client:', error);
     return null;
   }
 }
 
 /**
- * Create Square payment for $10/month subscription
+ * Create Stripe payment intent for $10/month subscription
  */
 export const createSubscriptionPayment = async (req, res) => {
   try {
     const userId = req.userId;
     const amount = 10.00; // $10 per month
-    const currency = 'USD';
+    const currency = 'usd';
 
     const user = await userService.findById(userId);
     if (!user) {
       return res.status(404).json({ error: 'User not found' });
     }
 
-    // Get or initialize Square client
-    const client = getSquareClient();
-    if (!client) {
-      throw new Error('Square client could not be initialized. Please check SQUARE_ACCESS_TOKEN in your environment variables.');
+    // Get or initialize Stripe client
+    const stripe = getStripeClient();
+    if (!stripe) {
+      throw new Error('Stripe client could not be initialized. Please check STRIPE_SECRET_KEY in your environment variables.');
+    }
+
+    // Cancel any old pending invoices for this user (to prevent multiple pending invoices)
+    try {
+      const oldPendingInvoices = await invoiceService.find(
+        { userId, status: 'Pending' },
+        { sort: { createdAt: -1 } }
+      );
+      
+      // Mark ALL old pending invoices as Failed (to prevent multiple pending invoices)
+      // When creating a new payment attempt, cancel all previous pending attempts
+      for (const oldInvoice of oldPendingInvoices) {
+        await invoiceService.update(oldInvoice.id, {
+          status: 'Failed'
+        });
+      }
+    } catch (cleanupError) {
+      console.error('Error cleaning up old pending invoices:', cleanupError);
+      // Continue even if cleanup fails
     }
 
     // Create invoice
     const invoiceId = `INV-${Date.now()}-${crypto.randomBytes(4).toString('hex')}`;
     const invoice = await invoiceService.create({
       invoiceId,
-      invoiceNumber: invoiceId, // Use invoiceId as invoiceNumber to ensure uniqueness
+      invoiceNumber: invoiceId,
       userId,
       amount: amount,
       currency: currency.toUpperCase(),
       subscriptionPlan: 'basic',
       status: 'Pending',
-      paymentMethod: 'square',
+      paymentMethod: 'stripe',
       description: 'Basic Subscription - 250MB File Upload Limit (Monthly)',
-      subscriptionStartDate: null, // Will be set after payment
+      subscriptionStartDate: null,
       subscriptionEndDate: null
     });
 
-    // Access Square Orders API
-    // In Square SDK v42, APIs are accessed as getters: client.orders (not ordersApi)
-    let ordersApi;
-    try {
-      ordersApi = client.orders; // Use .orders, not .ordersApi
-    } catch (error) {
-      console.error('Error accessing orders API:', error);
-      throw new Error('Square Orders API is not accessible. Please check your Square SDK configuration.');
-    }
-    
-    if (!ordersApi) {
-      console.error('Square access token configured:', !!process.env.SQUARE_ACCESS_TOKEN);
-      console.error('Square location ID configured:', !!process.env.SQUARE_LOCATION_ID);
-      throw new Error('Square Orders API is not available. Please check your Square SDK version and ensure your access token has the correct permissions.');
-    }
-    
-    // Get a valid location ID (automatically detects if configured one is invalid)
-    const locationId = await getValidLocationId(client);
-    
-    if (!locationId) {
-      throw new Error('No valid location ID found. Please set SQUARE_LOCATION_ID or ensure your access token has access to at least one location.');
-    }
-    
-    const orderRequest = {
-      idempotencyKey: crypto.randomUUID(),
-      order: {
-        locationId: locationId,
-        lineItems: [{
-          name: 'Basic Subscription - 250MB Upload Limit (Monthly)',
-          quantity: '1',
-          basePriceMoney: {
-            amount: BigInt(Math.round(amount * 100)), // Square uses cents and expects bigint
-            currency: currency.toUpperCase()
-          }
-        }],
-        referenceId: invoice.invoiceId,
-        metadata: {
-          userId: userId.toString(),
-          invoiceId: invoice.invoiceId,
-          type: 'subscription'
-        }
-      }
-    };
+    // Create payment intent - explicitly only accept card payments (no redirects)
+    const paymentIntent = await stripe.paymentIntents.create({
+      amount: Math.round(amount * 100), // Convert to cents
+      currency: currency,
+      payment_method_types: ['card'], // Explicitly only accept card payments
+      metadata: {
+        userId: userId.toString(),
+        invoiceId: invoice.invoiceId,
+        type: 'subscription'
+      },
+      description: `Subscription payment for invoice ${invoice.invoiceId}`
+    });
 
-    // In Square SDK v42, the method is 'create', not 'createOrder'
-    const response = await ordersApi.create(orderRequest);
-    
-    // Check for errors
-    if (response.errors && response.errors.length > 0) {
-      throw new Error(response.errors[0].detail || 'Failed to create order');
-    }
-    
-    if (!response.order) {
-      throw new Error('Order was not created');
-    }
-    
-    // Update invoice with Square order ID
+    // Update invoice with Stripe payment intent ID
     await invoiceService.update(invoice.id, {
-      squareOrderId: response.order.id
+      stripePaymentIntentId: paymentIntent.id
     });
 
     res.status(200).json({
       success: true,
-      orderId: response.order.id,
+      paymentIntentId: paymentIntent.id,
+      clientSecret: paymentIntent.client_secret,
       invoiceId: invoice.invoiceId,
       amount: amount,
-      currency: currency,
-      paymentRequest: {
-        orderId: response.order.id,
-        locationId: locationId,
-        applicationId: process.env.SQUARE_APPLICATION_ID
-      }
+      currency: currency
     });
 
   } catch (error) {
     console.error('Error creating subscription payment:', error);
     
-    // Handle Square API errors specifically (SDK v42 format)
-    if (error.statusCode === 401) {
-      console.error('❌ Authentication failed. Please check:');
-      console.error('  1. SQUARE_ACCESS_TOKEN is correct');
-      console.error('  2. Token matches the environment (sandbox vs production)');
-      console.error('  3. Token has not expired');
-      console.error('  4. Token has ORDERS_WRITE permission');
+    // Handle Stripe errors
+    if (error.type === 'StripeAuthenticationError') {
       return res.status(401).json({ 
-        error: 'Square authentication failed. Please verify your SQUARE_ACCESS_TOKEN is correct and has the required permissions.',
-        details: error.errors || error.body?.errors
+        error: 'Stripe authentication failed. Please verify your STRIPE_SECRET_KEY is correct.',
+        details: error.message
       });
     }
     
-    if (error.statusCode === 403) {
-      // Clear cached location ID so we try to fetch a new one next time
-      cachedLocationId = null;
-      
-      console.error('❌ Authorization failed. The access token does not have permission for the specified location.');
-      console.error(`   Location ID used: ${process.env.SQUARE_LOCATION_ID}`);
-      
-      // Try to get available locations to suggest alternatives
-      let availableLocations = [];
-      try {
-        const locationsResponse = await client.locations.list();
-        if (locationsResponse.locations && locationsResponse.locations.length > 0) {
-          availableLocations = locationsResponse.locations.map(loc => ({
-            id: loc.id,
-            name: loc.name || 'Unnamed'
-          }));
-          console.error(`   Available locations for your token: ${availableLocations.map(l => l.id).join(', ')}`);
-        }
-      } catch (locError) {
-        console.error('   Could not fetch available locations:', locError.message);
-      }
-      
-      console.error('   Please check:');
-      console.error('  1. The SQUARE_LOCATION_ID matches a location your token has access to');
-      console.error('  2. Your token has ORDERS_WRITE permission for this location');
-      console.error('  3. Use the /api/payments/square/locations endpoint to see available locations');
-      
+    if (error.type === 'StripePermissionError') {
       return res.status(403).json({ 
-        error: `Not authorized to access orders with location_id=${process.env.SQUARE_LOCATION_ID}. Please verify your SQUARE_LOCATION_ID is correct and your access token has permission for this location.`,
-        details: error.errors || error.body?.errors,
-        suggestion: 'Use GET /api/payments/square/locations to see available locations for your token',
-        availableLocations: availableLocations.length > 0 ? availableLocations : undefined
+        error: 'Stripe authorization failed. Please verify your API key has the required permissions.',
+        details: error.message
       });
     }
     
-    // Extract error message from Square SDK v42 error format
-    const errorMessage = error.errors?.[0]?.detail || error.body?.errors?.[0]?.detail || error.message || 'Failed to create payment request';
     res.status(error.statusCode || 500).json({ 
-      error: errorMessage,
-      details: error.errors || error.body?.errors || error.stack
+      error: error.message || 'Failed to create payment request',
+      details: error.type || 'Unknown error'
     });
   }
 };
 
 /**
- * Process Square payment after card tokenization
+ * Process Stripe payment after card tokenization
  */
 export const processSubscriptionPayment = async (req, res) => {
   try {
     const userId = req.userId;
-    const { sourceId, orderId, invoiceId, idempotencyKey } = req.body;
+    const { paymentIntentId, paymentMethodId, invoiceId } = req.body;
 
-    if (!sourceId || !orderId || !invoiceId) {
+    if (!paymentIntentId || !paymentMethodId || !invoiceId) {
       return res.status(400).json({ 
-        error: 'Source ID, Order ID, and Invoice ID are required' 
+        error: 'Payment Intent ID, Payment Method ID, and Invoice ID are required' 
       });
     }
 
@@ -320,222 +174,172 @@ export const processSubscriptionPayment = async (req, res) => {
       return res.status(404).json({ error: 'Invoice not found' });
     }
 
-    // Get or initialize Square client
-    const client = getSquareClient();
-    if (!client) {
-      throw new Error('Square client could not be initialized. Please check SQUARE_ACCESS_TOKEN in your environment variables.');
+    // Get or initialize Stripe client
+    const stripe = getStripeClient();
+    if (!stripe) {
+      throw new Error('Stripe client could not be initialized. Please check STRIPE_SECRET_KEY in your environment variables.');
     }
 
-    // Access Square Payments API
-    // In Square SDK v42, APIs are accessed as getters: client.payments (not paymentsApi)
-    let paymentsApi;
-    try {
-      paymentsApi = client.payments; // Use .payments, not .paymentsApi
-    } catch (error) {
-      console.error('Error accessing payments API:', error);
-      throw new Error('Square Payments API is not accessible. Please check your Square SDK configuration.');
-    }
-    
-    if (!paymentsApi) {
-      console.error('Square Payments API is not available');
-      throw new Error('Square Payments API is not available. Please verify your Square configuration.');
-    }
+    // Confirm the payment intent
+    const paymentIntent = await stripe.paymentIntents.confirm(paymentIntentId, {
+      payment_method: paymentMethodId
+    });
 
-    // Create payment
-    const paymentRequest = {
-      sourceId: sourceId,
-      idempotencyKey: idempotencyKey || crypto.randomUUID(),
-      amountMoney: {
-        amount: BigInt(Math.round(invoice.amount * 100)), // Convert to cents and use bigint
-        currency: invoice.currency
-      },
-      orderId: orderId,
-      referenceId: invoice.invoiceId,
-      note: `Subscription payment for invoice ${invoice.invoiceId}`,
-      metadata: {
-        userId: userId.toString(),
-        invoiceId: invoice.invoiceId,
-        type: 'subscription'
-      }
-    };
-
-    // In Square SDK v42, the method is 'create', not 'createPayment'
-    let response;
-    try {
-      response = await paymentsApi.create(paymentRequest);
-    } catch (squareError) {
-      // Square SDK v42 throws errors, but also may return errors in response
-      console.error('Square payment creation error:', squareError);
-      
-      // Extract error details from Square error
-      // Square SDK v42 can have errors in multiple places
-      const squareErrors = squareError.errors || squareError.body?.errors || squareError.result?.errors || [];
-      const errorCode = squareErrors[0]?.code || 'PAYMENT_FAILED';
-      const errorDetail = squareErrors[0]?.detail || squareErrors[0]?.message || squareError.message || 'Payment processing failed';
-      const errorCategory = squareErrors[0]?.category || 'API_ERROR';
-      
-      // Return structured error information
-      return res.status(squareError.statusCode || 400).json({
-        success: false,
-        error: errorDetail,
-        errorCode: errorCode,
-        errorCategory: errorCategory,
-        errors: squareErrors,
-        payment: squareError.body?.payment || null
-      });
-    }
-
-    // Check for errors in response (Square may return errors even on 200)
-    if (response.errors && response.errors.length > 0) {
-      const errorCode = response.errors[0]?.code || 'PAYMENT_FAILED';
-      const errorDetail = response.errors[0]?.detail || 'Payment processing failed';
-      const errorCategory = response.errors[0]?.category || 'API_ERROR';
-      
-      return res.status(400).json({
-        success: false,
-        error: errorDetail,
-        errorCode: errorCode,
-        errorCategory: errorCategory,
-        errors: response.errors,
-        payment: response.payment || null
-      });
-    }
-
-    if (response.payment) {
-      const paymentStatus = response.payment.status;
-      
-      // Check if payment failed
-      if (paymentStatus === 'FAILED') {
-        const errorCode = 'PAYMENT_FAILED';
-        const errorDetail = 'Payment was declined by the payment processor';
-        
-        return res.status(400).json({
-          success: false,
-          error: errorDetail,
-          errorCode: errorCode,
-          errorCategory: 'PAYMENT_METHOD_ERROR',
-          errors: response.errors || [],
-          payment: response.payment
-        });
-      }
-      
+    if (paymentIntent.status === 'succeeded') {
       // Update invoice
-      const updateData = {
-        status: paymentStatus === 'COMPLETED' ? 'Paid' : 'Pending',
-        squarePaymentId: response.payment.id,
-        transactionHash: response.payment.id
-      };
-      
-      // Activate user subscription
-      if (paymentStatus === 'COMPLETED') {
         const startDate = new Date();
         const endDate = new Date();
         endDate.setMonth(endDate.getMonth() + 1); // 1 month subscription
         
-        updateData.subscriptionStartDate = startDate;
-        updateData.subscriptionEndDate = endDate;
-        
+      await invoiceService.update(invoice.id, {
+        status: 'Paid',
+        stripePaymentId: paymentIntent.id,
+        transactionHash: paymentIntent.id,
+        subscriptionStartDate: startDate,
+        subscriptionEndDate: endDate
+      });
+      
+      // Activate user subscription
         await userService.update(userId, {
           subscriptionStatus: 'active',
           subscriptionStartDate: startDate,
           subscriptionEndDate: endDate,
           fileSizeLimit: 250 * 1024 * 1024, // 250MB
-          totalFileSizeUsed: 0, // Reset on new subscription
+        totalFileSizeUsed: 0,
           lastSubscriptionInvoiceId: invoice.invoiceId
         });
-      }
-      
-      await invoiceService.update(invoice.id, updateData);
 
       res.status(200).json({
         success: true,
         payment: {
-          id: response.payment.id,
-          status: paymentStatus,
+          id: paymentIntent.id,
+          status: paymentIntent.status,
           invoiceId: invoice.invoiceId
         },
-        subscription: paymentStatus === 'COMPLETED' ? {
+        subscription: {
           status: 'active',
           fileSizeLimit: '250MB',
-          startDate: invoice.subscriptionStartDate,
-          endDate: invoice.subscriptionEndDate
-        } : null
+          startDate: startDate,
+          endDate: endDate
+        }
+      });
+    } else if (paymentIntent.status === 'requires_action' || paymentIntent.status === 'requires_payment_method') {
+      // Payment requires additional action (e.g., 3D Secure)
+      // Invoice stays as Pending until payment is confirmed or fails
+      res.status(200).json({
+        success: false,
+        requiresAction: true,
+        clientSecret: paymentIntent.client_secret,
+        status: paymentIntent.status,
+        payment: {
+          id: paymentIntent.id,
+          status: paymentIntent.status
+        }
       });
     } else {
-      throw new Error('Payment creation failed');
+      // Payment failed - mark invoice as Failed
+      const errorMessage = paymentIntent.last_payment_error?.message || 'Payment processing failed';
+      
+      // Update invoice status to Failed
+      try {
+        await invoiceService.update(invoice.id, {
+          status: 'Failed',
+          stripePaymentId: paymentIntent.id
+        });
+      } catch (updateError) {
+        console.error('Error updating invoice status to Failed:', updateError);
+        // Continue even if update fails
+      }
+      
+      return res.status(400).json({
+        success: false,
+        error: errorMessage,
+        errorCode: paymentIntent.last_payment_error?.code || 'PAYMENT_FAILED',
+        payment: {
+          id: paymentIntent.id,
+          status: paymentIntent.status
+        }
+      });
     }
 
   } catch (error) {
     console.error('Error processing subscription payment:', error);
     
-    // Try to extract Square error details
-    const squareErrors = error.errors || error.body?.errors || error.response?.errors || [];
-    const errorCode = squareErrors[0]?.code || 'PAYMENT_ERROR';
-    const errorDetail = squareErrors[0]?.detail || error.message || 'Payment processing failed';
-    const errorCategory = squareErrors[0]?.category || 'API_ERROR';
+    // Try to update invoice status to Failed if we have the invoice
+    try {
+      if (req.body.invoiceId) {
+        const invoice = await invoiceService.findByInvoiceId(req.body.invoiceId);
+        if (invoice && invoice.status === 'Pending') {
+          await invoiceService.update(invoice.id, {
+            status: 'Failed'
+          });
+        }
+      }
+    } catch (updateError) {
+      console.error('Error updating invoice status to Failed:', updateError);
+      // Continue even if update fails
+    }
+    
+    // Handle Stripe errors
+    if (error.type === 'StripeCardError') {
+      return res.status(400).json({
+        success: false,
+        error: error.message || 'Card was declined',
+        errorCode: error.code || 'card_declined',
+        errorCategory: 'PAYMENT_METHOD_ERROR'
+      });
+    }
     
     res.status(error.statusCode || 500).json({ 
       success: false,
-      error: errorDetail,
-      errorCode: errorCode,
-      errorCategory: errorCategory,
-      errors: squareErrors,
-      details: error.stack
+      error: error.message || 'Payment processing failed',
+      errorCode: error.type || 'PAYMENT_ERROR'
     });
   }
 };
 
 /**
- * Handle Square webhooks
+ * Handle Stripe webhooks
  */
-export const handleSquareWebhook = async (req, res) => {
-  try {
-    // Square sends signature in x-square-hmacsha256-signature header
-    const signature = req.headers['x-square-hmacsha256-signature'] || req.headers['x-square-signature'];
-    
-    // Get raw body for signature verification
-    // req.body is a Buffer when using express.raw()
-    const rawBody = req.body instanceof Buffer ? req.body.toString('utf8') : JSON.stringify(req.body);
-    
-    // Verify webhook signature if signature key is configured
-    if (process.env.SQUARE_WEBHOOK_SIGNATURE_KEY && signature) {
-      const hmac = crypto.createHmac('sha256', process.env.SQUARE_WEBHOOK_SIGNATURE_KEY);
-      hmac.update(rawBody);
-      const hash = hmac.digest('base64');
+export const handleStripeWebhook = async (req, res) => {
+  const sig = req.headers['stripe-signature'];
+  
+  let event;
 
-      if (hash !== signature) {
-        console.error('Invalid webhook signature. Expected:', hash, 'Received:', signature);
-        return res.status(401).json({ error: 'Invalid webhook signature' });
-      }
-      console.log('✅ Webhook signature verified');
-    } else if (process.env.SQUARE_WEBHOOK_SIGNATURE_KEY && !signature) {
-      console.warn('⚠️ Webhook signature key is set but no signature header found');
+  try {
+    // Get Stripe client for webhook verification
+    const stripe = getStripeClient();
+    if (!stripe) {
+      console.error('Stripe client not initialized for webhook verification');
+      return res.status(500).json({ error: 'Stripe client not initialized' });
     }
 
-    // Parse the body if it's a string
-    const event = typeof rawBody === 'string' ? JSON.parse(rawBody) : req.body;
-    console.log('Received Square webhook:', event.type);
-    
-    // Handle payment updated event
-    if (event.type === 'payment.updated') {
-      const payment = event.data?.object?.payment_updated;
-      if (!payment) {
-        console.error('Payment data not found in webhook');
-        return res.status(400).json({ error: 'Payment data not found' });
-      }
+    // Verify webhook signature
+    const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET;
+    if (!webhookSecret) {
+      console.warn('⚠️ STRIPE_WEBHOOK_SECRET not set. Webhook signature verification skipped.');
+      // In development, you might want to parse the event without verification
+      event = req.body;
+    } else {
+      event = stripe.webhooks.constructEvent(req.body, sig, webhookSecret);
+    }
 
-      const paymentId = payment.id;
+    console.log('Received Stripe webhook:', event.type);
+
+    // Handle payment intent succeeded
+    if (event.type === 'payment_intent.succeeded') {
+      const paymentIntent = event.data.object;
       
-      const invoice = await invoiceService.findBySquarePaymentId(paymentId);
+      const invoice = await invoiceService.findByStripePaymentIntentId(paymentIntent.id);
 
       if (invoice && invoice.status !== 'Paid') {
-        if (payment.status === 'COMPLETED') {
           const startDate = new Date();
           const endDate = new Date();
-          endDate.setMonth(endDate.getMonth() + 1); // 1 month subscription
+        endDate.setMonth(endDate.getMonth() + 1);
           
           await invoiceService.update(invoice.id, {
             status: 'Paid',
+          stripePaymentId: paymentIntent.id,
             subscriptionStartDate: startDate,
             subscriptionEndDate: endDate
           });
@@ -553,19 +357,40 @@ export const handleSquareWebhook = async (req, res) => {
             });
             console.log(`✅ Subscription activated for user ${user.email}`);
           }
+      }
+    } else if (event.type === 'payment_intent.payment_failed') {
+      const paymentIntent = event.data.object;
+      
+      const invoice = await invoiceService.findByStripePaymentIntentId(paymentIntent.id);
           
-        } else if (payment.status === 'FAILED' || payment.status === 'CANCELED') {
-          await invoiceService.update(invoice.id, {
-            status: 'Failed'
-          });
-        }
+      if (invoice && invoice.status !== 'Failed') {
+        await invoiceService.update(invoice.id, {
+          status: 'Failed',
+          stripePaymentId: paymentIntent.id
+        });
+      }
+    } else if (event.type === 'payment_intent.canceled') {
+      const paymentIntent = event.data.object;
+      
+      const invoice = await invoiceService.findByStripePaymentIntentId(paymentIntent.id);
+          
+      if (invoice && invoice.status === 'Pending') {
+        await invoiceService.update(invoice.id, {
+          status: 'Failed',
+          stripePaymentId: paymentIntent.id
+        });
       }
     }
 
     res.status(200).json({ received: true });
 
   } catch (error) {
-    console.error('Error handling Square webhook:', error);
+    console.error('Error handling Stripe webhook:', error);
+    
+    if (error.type === 'StripeSignatureVerificationError') {
+      return res.status(400).json({ error: 'Invalid webhook signature' });
+    }
+    
     res.status(500).json({ error: 'Webhook processing failed' });
   }
 };
@@ -610,8 +435,6 @@ export const getSubscriptionStatus = async (req, res) => {
 
 /**
  * Cancel current user's active subscription
- * - Marks latest paid invoice as Cancelled
- * - Sets user.subscriptionStatus to inactive and updates subscriptionEndDate
  */
 export const cancelSubscription = async (req, res) => {
   try {
@@ -662,233 +485,89 @@ export const cancelSubscription = async (req, res) => {
 };
 
 /**
- * Get available Square locations for the access token
- */
-export const getSquareLocations = async (req, res) => {
-  try {
-    const client = getSquareClient();
-    if (!client) {
-      return res.status(500).json({ 
-        error: 'Square client is not initialized. Please check SQUARE_ACCESS_TOKEN in your environment variables.' 
-      });
-    }
-
-    try {
-      const response = await client.locations.list();
-      
-      if (response.errors && response.errors.length > 0) {
-        return res.status(500).json({ 
-          error: 'Failed to fetch locations',
-          details: response.errors
-        });
-      }
-
-      const locations = response.locations || [];
-      
-      res.status(200).json({
-        success: true,
-        locations: locations.map(loc => ({
-          id: loc.id,
-          name: loc.name,
-          address: loc.address,
-          status: loc.status,
-          capabilities: loc.capabilities
-        })),
-        currentLocationId: process.env.SQUARE_LOCATION_ID,
-        message: locations.length > 0 
-          ? `Found ${locations.length} location(s). Use one of these IDs in your SQUARE_LOCATION_ID environment variable.`
-          : 'No locations found. Please create a location in your Square dashboard first.'
-      });
-    } catch (error) {
-      console.error('Error fetching locations:', error);
-      res.status(500).json({ 
-        error: 'Failed to fetch locations',
-        details: error.errors || error.message
-      });
-    }
-  } catch (error) {
-    console.error('Error getting Square locations:', error);
-    res.status(500).json({ error: 'Failed to get Square locations' });
-  }
-};
-
-/**
- * Verify card with $1 charge and immediately void it
- * This is used during signup to verify the card is valid
+ * Verify card using Stripe Setup Intent (no charge)
+ * This is used during signup to verify the card is valid without charging it
  */
 export const verifyCard = async (req, res) => {
   try {
-    const { sourceId } = req.body;
+    const { paymentMethodId } = req.body;
 
-    if (!sourceId) {
-      return res.status(400).json({ error: 'Source ID (payment token) is required' });
+    if (!paymentMethodId) {
+      return res.status(400).json({ error: 'Payment Method ID is required' });
     }
 
-    // Get or initialize Square client
-    const client = getSquareClient();
-    if (!client) {
-      throw new Error('Square client could not be initialized. Please check SQUARE_ACCESS_TOKEN in your environment variables.');
+    // Get or initialize Stripe client
+    const stripe = getStripeClient();
+    if (!stripe) {
+      throw new Error('Stripe client could not be initialized. Please check STRIPE_SECRET_KEY in your environment variables.');
     }
 
-    // Access Square Payments API
-    let paymentsApi;
-    try {
-      paymentsApi = client.payments;
-    } catch (error) {
-      console.error('Error accessing payments API:', error);
-      throw new Error('Square Payments API is not accessible.');
-    }
-    
-    if (!paymentsApi) {
-      throw new Error('Square Payments API is not available.');
-    }
-
-    // Get location ID
-    const locationId = await getValidLocationId(client);
-    if (!locationId) {
-      throw new Error('No valid location ID found.');
-    }
-
-    const verificationAmount = 1.00; // $1.00 verification charge
-    const idempotencyKey = crypto.randomUUID();
-
-    // Step 1: Create $1 verification payment
-    const paymentRequest = {
-      sourceId: sourceId,
-      idempotencyKey: idempotencyKey,
-      amountMoney: {
-        amount: BigInt(100), // $1.00 in cents
-        currency: 'USD'
-      },
-      referenceId: `VERIFY-${Date.now()}`,
-      note: 'Card verification - will be voided immediately',
+    // Create a Setup Intent to verify the card without charging it
+    // Setup Intent is specifically designed for verifying payment methods
+    const setupIntent = await stripe.setupIntents.create({
+      payment_method: paymentMethodId,
+      payment_method_types: ['card'], // Explicitly only accept card payments
       metadata: {
         type: 'card_verification'
-      }
-    };
+      },
+      description: 'Card verification - no charge'
+    });
 
-    let paymentResponse;
-    try {
-      paymentResponse = await paymentsApi.create(paymentRequest);
-    } catch (squareError) {
-      console.error('Square verification payment error:', squareError);
-      const squareErrors = squareError.errors || squareError.body?.errors || squareError.result?.errors || [];
-      const errorDetail = squareErrors[0]?.detail || squareErrors[0]?.message || squareError.message || 'Card verification failed';
-      
-      return res.status(squareError.statusCode || 400).json({
-        success: false,
-        error: errorDetail,
-        errorCode: squareErrors[0]?.code || 'VERIFICATION_FAILED',
-        errors: squareErrors
+    // Confirm the Setup Intent to verify the payment method
+    const confirmedSetupIntent = await stripe.setupIntents.confirm(setupIntent.id, {
+      payment_method: paymentMethodId
+    });
+
+    // Check if setup intent succeeded
+    if (confirmedSetupIntent.status === 'succeeded') {
+      return res.status(200).json({
+        success: true,
+        verified: true,
+        message: 'Card verified successfully. No charge was made to your card.'
       });
-    }
-
-    // Check for errors in response
-    if (paymentResponse.errors && paymentResponse.errors.length > 0) {
-      const errorDetail = paymentResponse.errors[0]?.detail || 'Card verification failed';
-      return res.status(400).json({
+    } else if (confirmedSetupIntent.status === 'requires_action') {
+      // Setup Intent requires 3D Secure authentication
+      return res.status(200).json({
         success: false,
-        error: errorDetail,
-        errorCode: paymentResponse.errors[0]?.code || 'VERIFICATION_FAILED',
-        errors: paymentResponse.errors
+        verified: false,
+        requiresAction: true,
+        clientSecret: confirmedSetupIntent.client_secret,
+        error: 'Card verification requires additional authentication. Please complete the verification process.',
+        errorCode: 'REQUIRES_ACTION'
       });
-    }
-
-    if (!paymentResponse.payment) {
-      throw new Error('Payment verification failed - no payment returned');
-    }
-
-    const payment = paymentResponse.payment;
-    const paymentId = payment.id;
-
-    // Step 2: Process refund - will be returned to user's account
-    if (payment.status === 'COMPLETED' || payment.status === 'APPROVED') {
-      try {
-        // Use refunds API to refund the verification payment
-        const refundsApi = client.refunds;
-        if (!refundsApi) {
-          console.warn('Refunds API not available, payment verified but refund needs to be processed manually');
-          return res.status(200).json({
-            success: true,
-            verified: true,
-            message: 'Card verified successfully. The $1 verification charge will be refunded within 24 hours.',
-            paymentId: paymentId,
-            refunded: false,
-            note: 'Refund will be processed automatically within 24 hours.'
-          });
-        }
-
-        // Process refund
-        const refundResponse = await refundsApi.refundPayment({
-          idempotencyKey: crypto.randomUUID(),
-          amountMoney: {
-            amount: BigInt(100), // $1.00 in cents
-            currency: 'USD'
-          },
-          paymentId: paymentId,
-          reason: 'Card verification - refunding test charge'
-        });
-
-        if (refundResponse.errors && refundResponse.errors.length > 0) {
-          console.error('Error processing refund:', refundResponse.errors);
-          // Verification succeeded, but refund failed - still return success
-          return res.status(200).json({
-            success: true,
-            verified: true,
-            message: 'Card verified successfully. The $1 verification charge will be refunded within 24 hours.',
-            paymentId: paymentId,
-            refunded: false,
-            note: 'Refund processing initiated. You will receive your refund within 3-5 business days.'
-          });
-        }
-
-        // Refund processed successfully
-        const refundStatus = refundResponse.refund?.status || 'PENDING';
-        
-        return res.status(200).json({
-          success: true,
-          verified: true,
-          message: 'Card verified successfully. The $1 verification charge has been refunded and will be returned to your account within 3-5 business days.',
-          paymentId: paymentId,
-          refundId: refundResponse.refund?.id,
-          refunded: true,
-          refundStatus: refundStatus
-        });
-        
-      } catch (refundError) {
-        console.error('Error refunding verification payment:', refundError);
-        // Verification was successful, but refund failed
-        // Still return success - card is verified, refund can be processed later
-        return res.status(200).json({
-          success: true,
-          verified: true,
-          message: 'Card verified successfully. The $1 verification charge will be automatically refunded within 24 hours.',
-          paymentId: paymentId,
-          refunded: false,
-          note: 'If you see a $1 charge on your statement, it will be refunded automatically within 3-5 business days.'
-        });
-      }
-    } else if (payment.status === 'FAILED') {
+    } else if (confirmedSetupIntent.status === 'requires_payment_method') {
+      // Payment method is invalid
       return res.status(400).json({
         success: false,
         verified: false,
         error: 'Card verification failed. Please check your card information and try again.',
-        errorCode: 'CARD_DECLINED'
+        errorCode: 'INVALID_PAYMENT_METHOD'
       });
     } else {
-      // Payment is pending or in another state
-      return res.status(200).json({
-        success: true,
-        verified: true,
-        message: 'Card verified successfully.',
-        paymentId: paymentId,
-        status: payment.status
+      // Setup Intent failed
+      const errorMessage = confirmedSetupIntent.last_setup_error?.message || 'Card verification failed. Please check your card information and try again.';
+      return res.status(400).json({
+        success: false,
+        verified: false,
+        error: errorMessage,
+        errorCode: confirmedSetupIntent.last_setup_error?.code || 'CARD_DECLINED'
       });
     }
 
   } catch (error) {
     console.error('Error verifying card:', error);
-    res.status(500).json({
+    
+    // Handle Stripe errors
+    if (error.type === 'StripeCardError') {
+      return res.status(400).json({
+        success: false,
+        verified: false,
+        error: error.message || 'Card verification failed. Please check your card information.',
+        errorCode: error.code || 'CARD_DECLINED'
+      });
+    }
+    
+    res.status(error.statusCode || 500).json({
       success: false,
       verified: false,
       error: error.message || 'Card verification failed'
@@ -897,52 +576,32 @@ export const verifyCard = async (req, res) => {
 };
 
 /**
- * Get Square configuration for frontend
+ * Get Stripe configuration for frontend (publishable key)
  */
-export const getSquareConfig = async (req, res) => {
+export const getStripeConfig = async (req, res) => {
   try {
-    const environment = process.env.SQUARE_ENVIRONMENT || 'sandbox';
-    const applicationId = process.env.SQUARE_APPLICATION_ID;
-    const locationId = process.env.SQUARE_LOCATION_ID;
+    const publishableKey = process.env.STRIPE_PUBLISHABLE_KEY;
 
-    if (!applicationId || !locationId) {
+    if (!publishableKey) {
       return res.status(500).json({ 
-        error: 'Square configuration is missing. Please set SQUARE_APPLICATION_ID and SQUARE_LOCATION_ID in environment variables.' 
+        error: 'Stripe configuration is missing. Please set STRIPE_PUBLISHABLE_KEY in environment variables.' 
       });
     }
 
     // Try to initialize client to verify it works
-    const client = getSquareClient();
-    const clientStatus = client ? 'initialized' : 'failed';
-    const hasOrdersApi = client && client.orders ? true : false;
-    const hasPaymentsApi = client && client.payments ? true : false;
-    
-    // Get all property names for debugging
-    const clientKeys = client ? Object.keys(client) : [];
-    const apiKeys = client ? Object.keys(client).filter(key => key.toLowerCase().includes('api')) : [];
+    const stripe = getStripeClient();
+    const clientStatus = stripe ? 'initialized' : 'failed';
 
     res.status(200).json({
       success: true,
       config: {
-        applicationId,
-        locationId,
-        environment,
-        // Use production SDK URL for production, sandbox for sandbox
-        sdkUrl: environment === 'production' 
-          ? 'https://web.squarecdn.com/v1/square.js'
-          : 'https://sandbox.web.squarecdn.com/v1/square.js',
-        // Diagnostic info
-        clientStatus,
-        hasOrdersApi,
-        hasPaymentsApi,
-        clientKeys,
-        apiKeys
+        publishableKey,
+        clientStatus
       }
     });
 
   } catch (error) {
-    console.error('Error getting Square config:', error);
-    res.status(500).json({ error: 'Failed to get Square configuration' });
+    console.error('Error getting Stripe config:', error);
+    res.status(500).json({ error: 'Failed to get Stripe configuration' });
   }
 };
-

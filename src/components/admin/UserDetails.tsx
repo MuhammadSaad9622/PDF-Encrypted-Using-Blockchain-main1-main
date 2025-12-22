@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { User, FileText, Wallet, ArrowLeft, ExternalLink, CheckCircle, Key, Users, Shield, XCircle, Edit2, Save, X, AlertTriangle, MessageSquare } from 'lucide-react';
+import { User, FileText, Wallet, ArrowLeft, ExternalLink, CheckCircle, Key, Users, Shield, XCircle, Edit2, Save, X, AlertTriangle, MessageSquare, UserPlus } from 'lucide-react';
 import { adminApi } from '../../utils/api';
 
 interface UserDetailsProps {
@@ -35,6 +35,7 @@ interface UserDetails {
   adminNotes?: string;
   totalFileSizeUsed?: number;
   fileSizeLimit?: number;
+  role?: string;
 }
 
 interface NFT {
@@ -66,6 +67,7 @@ const UserDetails = ({ userId, onBack }: UserDetailsProps) => {
   const [error, setError] = useState<string | null>(null);
   const [cancellingSubscription, setCancellingSubscription] = useState(false);
   const [showCancelSubscriptionModal, setShowCancelSubscriptionModal] = useState(false);
+  const [promoting, setPromoting] = useState(false);
 
   useEffect(() => {
     if (userId) {
@@ -163,7 +165,8 @@ const UserDetails = ({ userId, onBack }: UserDetailsProps) => {
         suspendedReason: userData.suspendedReason || '',
         adminNotes: userData.adminNotes || '',
         totalFileSizeUsed: userData.totalFileSizeUsed !== undefined ? userData.totalFileSizeUsed : (nftResponse?.user?.totalFileSizeUsed !== undefined ? nftResponse.user.totalFileSizeUsed : 0),
-        fileSizeLimit: userData.fileSizeLimit !== undefined ? userData.fileSizeLimit : (nftResponse?.user?.fileSizeLimit !== undefined ? nftResponse.user.fileSizeLimit : (250 * 1024 * 1024))
+        fileSizeLimit: userData.fileSizeLimit !== undefined ? userData.fileSizeLimit : (nftResponse?.user?.fileSizeLimit !== undefined ? nftResponse.user.fileSizeLimit : (250 * 1024 * 1024)),
+        role: userData.role || 'user'
       };
       
       console.log('User details loaded:', mergedUserData);
@@ -287,6 +290,25 @@ const UserDetails = ({ userId, onBack }: UserDetailsProps) => {
       alert(error?.message || 'Failed to cancel user subscription');
     } finally {
       setCancellingSubscription(false);
+    }
+  };
+
+  const handlePromoteUser = async () => {
+    if (!userDetails) return;
+    
+    if (!confirm(`Are you sure you want to promote ${userDetails.name || userDetails.email} to admin? This action cannot be easily undone.`)) {
+      return;
+    }
+
+    try {
+      setPromoting(true);
+      await adminApi.promoteUserToAdmin(userDetails.id);
+      await fetchUserDetails();
+      alert('User promoted to admin successfully!');
+    } catch (error: any) {
+      alert(error?.message || 'Failed to promote user. Please try again.');
+    } finally {
+      setPromoting(false);
     }
   };
 
@@ -440,6 +462,33 @@ const UserDetails = ({ userId, onBack }: UserDetailsProps) => {
 
         {/* Admin Actions */}
         <div className="flex flex-wrap items-center gap-3 pt-4 border-t border-gray-800">
+          {userDetails.role !== 'admin' && (
+            <button
+              onClick={handlePromoteUser}
+              disabled={promoting}
+              className="btn-secondary flex items-center space-x-2 text-purple-400 hover:bg-purple-500/20 disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              {promoting ? (
+                <>
+                  <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>
+                  <span>Promoting...</span>
+                </>
+              ) : (
+                <>
+                  <UserPlus className="h-4 w-4" />
+                  <span>Promote to Admin</span>
+                </>
+              )}
+            </button>
+          )}
+          
+          {userDetails.role === 'admin' && (
+            <span className="px-3 py-2 rounded-lg text-sm font-semibold bg-purple-500/20 text-purple-400 flex items-center space-x-2">
+              <Shield className="h-4 w-4" />
+              <span>Admin</span>
+            </span>
+          )}
+
           {!userDetails.isSuspended && (
             <button
               onClick={() => setShowSuspendModal(true)}
